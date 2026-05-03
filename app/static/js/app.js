@@ -1,294 +1,503 @@
-// API Base URL
-const API_URL = '';
+// === State ===
+let token = localStorage.getItem('token') || '';
+let currentUser = null;
+let masterData = { types: [], manufacturers: [], locations: [] };
+let scanner = null;
 
-// Aktuelle Daten
-let currentData = {
-    mitglieder: [],
-    fahrzeuge: [],
-    einsaetze: []
-};
-
-// Formular-Konfiguration
-const formConfig = {
-    mitglied: {
-        title: 'Mitglied',
-        fields: [
-            { name: 'dienstnummer', label: 'Dienstnummer', type: 'text', required: true },
-            { name: 'vorname', label: 'Vorname', type: 'text', required: true },
-            { name: 'nachname', label: 'Nachname', type: 'text', required: true },
-            { name: 'geburtsdatum', label: 'Geburtsdatum', type: 'date', required: false },
-            { name: 'eintrittsdatum', label: 'Eintrittsdatum', type: 'date', required: false },
-            { name: 'funktion', label: 'Funktion', type: 'text', required: false, placeholder: 'z.B. Kommandant, Maschinist' },
-            { name: 'status', label: 'Status', type: 'select', options: ['aktiv', 'inaktiv', 'ehrenmitglied'], required: false },
-            { name: 'telefon', label: 'Telefon', type: 'tel', required: false },
-            { name: 'email', label: 'E-Mail', type: 'email', required: false },
-            { name: 'adresse', label: 'Adresse', type: 'textarea', required: false },
-            { name: 'notizen', label: 'Notizen', type: 'textarea', required: false }
-        ]
-    },
-    fahrzeug: {
-        title: 'Fahrzeug',
-        fields: [
-            { name: 'kennzeichen', label: 'Kennzeichen', type: 'text', required: true },
-            { name: 'bezeichnung', label: 'Bezeichnung', type: 'text', required: true, placeholder: 'z.B. RLF-A 2000' },
-            { name: 'marke', label: 'Marke', type: 'text', required: false },
-            { name: 'typ', label: 'Typ', type: 'text', required: false },
-            { name: 'baujahr', label: 'Baujahr', type: 'number', required: false },
-            { name: 'sitzplaetze', label: 'Sitzplätze', type: 'number', required: false },
-            { name: 'status', label: 'Status', type: 'select', options: ['einsatzbereit', 'werkstatt', 'außer dienst'], required: false },
-            { name: 'letzte_inspektion', label: 'Letzte Inspektion', type: 'date', required: false },
-            { name: 'naechste_inspektion', label: 'Nächste Inspektion', type: 'date', required: false },
-            { name: 'notizen', label: 'Notizen', type: 'textarea', required: false }
-        ]
-    },
-    einsatz: {
-        title: 'Einsatz',
-        fields: [
-            { name: 'einsatznummer', label: 'Einsatznummer', type: 'text', required: true },
-            { name: 'stichwort', label: 'Stichwort', type: 'text', required: true, placeholder: 'z.B. B1, TH1' },
-            { name: 'beschreibung', label: 'Beschreibung', type: 'textarea', required: false },
-            { name: 'adresse', label: 'Adresse', type: 'text', required: true },
-            { name: 'ort', label: 'Ort', type: 'text', required: false },
-            { name: 'melder', label: 'Melder', type: 'text', required: false },
-            { name: 'status', label: 'Status', type: 'select', options: ['offen', 'abgeschlossen'], required: false }
-        ]
+// === API Helper ===
+async function api(url, opts = {}) {
+    const headers = { 'Content-Type': 'application/json', ...opts.headers };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(url, { ...opts, headers });
+    if (res.status === 401) { logout(); throw new Error('Nicht autorisiert'); }
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Fehler ${res.status}`);
     }
-};
-
-// Tabellenspalten-Konfiguration
-const tableColumns = {
-    mitglieder: [
-        { key: 'dienstnummer', label: 'Dienstnr.' },
-        { key: 'nachname', label: 'Name', format: (m) => `${m.vorname} ${m.nachname}` },
-        { key: 'funktion', label: 'Funktion' },
-        { key: 'status', label: 'Status', class: (v) => `status-${v}` },
-        { key: 'telefon', label: 'Telefon' }
-    ],
-    fahrzeuge: [
-        { key: 'kennzeichen', label: 'Kennzeichen' },
-        { key: 'bezeichnung', label: 'Bezeichnung' },
-        { key: 'status', label: 'Status', class: (v) => `status-${v.replace(' ', '-')}` },
-        { key: 'naechste_inspektion', label: 'Nächste Inspektion' }
-    ],
-    einsaetze: [
-        { key: 'einsatznummer', label: 'Nr.' },
-        { key: 'alarmierung', label: 'Alarmierung', format: (e) => e.alarmierung ? new Date(e.alarmierung).toLocaleString('de-DE') : '-' },
-        { key: 'stichwort', label: 'Stichwort' },
-        { key: 'adresse', label: 'Adresse' },
-        { key: 'status', label: 'Status', class: (v) => `status-${v}` }
-    ]
-};
-
-// --- Initialisierung ---
-document.addEventListener('DOMContentLoaded', () => {
-    // Tab-Navigation
-    document.querySelectorAll('.nav-btn').forEach(btn => {
-        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-    });
-
-    // Daten laden
-    loadAllData();
-});
-
-// --- Tabs ---
-function switchTab(tabName) {
-    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-    
-    document.querySelector(`.nav-btn[data-tab="${tabName}"]`).classList.add('active');
-    document.getElementById(tabName).classList.add('active');
+    if (res.status === 204) return null;
+    return res.json();
 }
 
-// --- Daten laden ---
-async function loadAllData() {
-    await Promise.all([
-        loadData('mitglieder'),
-        loadData('fahrzeuge'),
-        loadData('einsaetze')
-    ]);
+function uploadFile(url, formData) {
+    return fetch(url, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        body: formData
+    }).then(r => { if (!r.ok) throw new Error('Upload fehlgeschlagen'); return r.json(); });
 }
 
-async function loadData(type) {
+// === Auth ===
+async function handleLogin(e) {
+    e.preventDefault();
+    const user = document.getElementById('login-user').value;
+    const pass = document.getElementById('login-pass').value;
     try {
-        const response = await fetch(`${API_URL}/api/${type}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        currentData[type] = await response.json();
-        renderTable(type);
-    } catch (error) {
-        console.error(`Fehler beim Laden von ${type}:`, error);
-        alert(`Fehler beim Laden der ${type}. Ist der Server erreichbar?`);
+        const data = await api('/api/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ username: user, password: pass })
+        });
+        token = data.access_token;
+        localStorage.setItem('token', token);
+        await initApp();
+    } catch (err) {
+        alert('Anmeldung fehlgeschlagen: ' + err.message);
     }
 }
 
-// --- Tabellen rendern ---
-function renderTable(type) {
-    const tbody = document.querySelector(`#table-${type} tbody`);
-    const data = currentData[type];
-    const columns = tableColumns[type];
+async function initApp() {
+    try {
+        currentUser = await api('/api/auth/me');
+    } catch { return logout(); }
 
-    tbody.innerHTML = data.map(item => {
-        const cells = columns.map(col => {
-            let value = col.format ? col.format(item) : (item[col.key] || '-');
-            const cssClass = col.class ? col.class(item[col.key]) : '';
-            return `<td data-label="${col.label}"><span class="${cssClass}">${value}</span></td>`;
-        }).join('');
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('app-screen').classList.remove('hidden');
+    document.getElementById('user-name').textContent = currentUser.full_name;
 
-        return `
-            <tr>
-                ${cells}
-                <td data-label="Aktionen">
-                    <button class="btn-primary btn-small btn-edit" onclick="editItem('${type}', ${item.id})">Bearbeiten</button>
-                    <button class="btn-primary btn-small btn-delete" onclick="deleteItem('${type}', ${item.id})">Löschen</button>
-                </td>
-            </tr>
-        `;
-    }).join('');
+    // Rechte anwenden
+    const isAdmin = currentUser.role === 'admin';
+    const isVerwaltung = currentUser.role === 'verwaltung';
+    const isErweitert = currentUser.role === 'erweitert';
+    const canEdit = isAdmin || isVerwaltung || isErweitert;
 
-    if (data.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="${columns.length + 1}" style="text-align:center;padding:2rem;">Keine Einträge vorhanden</td></tr>`;
+    if (canEdit) {
+        document.getElementById('nav-new-object').classList.remove('hidden');
+        document.getElementById('dash-new').classList.remove('hidden');
     }
+    if (isAdmin) {
+        document.getElementById('nav-admin').classList.remove('hidden');
+    }
+
+    await loadMasterData();
+    showView('dashboard');
+    loadDashboardAlerts();
 }
 
-// --- Suche / Filter ---
-function filterTable(type) {
-    const searchTerm = document.getElementById(`search-${type}`).value.toLowerCase();
-    const rows = document.querySelectorAll(`#table-${type} tbody tr`);
-    
-    rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(searchTerm) ? '' : 'none';
+function logout() {
+    token = '';
+    localStorage.removeItem('token');
+    currentUser = null;
+    location.reload();
+}
+
+// === Views ===
+function showView(name) {
+    document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+    document.getElementById('view-' + name).classList.remove('hidden');
+    document.getElementById('mobile-menu').classList.add('hidden');
+    window.scrollTo(0, 0);
+}
+
+function toggleMenu() {
+    document.getElementById('mobile-menu').classList.toggle('hidden');
+}
+
+// === Master Data ===
+async function loadMasterData() {
+    masterData.types = await api('/api/object-types');
+    masterData.manufacturers = await api('/api/manufacturers');
+    masterData.locations = await api('/api/locations');
+    fillSelect('obj-type', masterData.types, 'name');
+    fillSelect('obj-manufacturer', masterData.manufacturers, 'name');
+    fillSelect('obj-location', flattenLocations(masterData.locations), 'name');
+}
+
+function fillSelect(id, items, labelKey) {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const currentVal = sel.value;
+    sel.innerHTML = '<option value="">-- Auswählen --</option>';
+    items.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.id;
+        opt.textContent = item[labelKey];
+        sel.appendChild(opt);
     });
+    sel.value = currentVal;
 }
 
-// --- Modal & Formular ---
-function openModal(type, editId = null) {
-    const config = formConfig[type];
-    const modal = document.getElementById('modal');
-    const title = document.getElementById('modal-title');
-    const formFields = document.getElementById('form-fields');
-    const editIdField = document.getElementById('edit-id');
-    const editTypeField = document.getElementById('edit-type');
+function flattenLocations(locations, prefix = '') {
+    let flat = [];
+    locations.forEach(loc => {
+        flat.push({ id: loc.id, name: prefix + loc.name });
+        if (loc.children) {
+            flat = flat.concat(flattenLocations(loc.children, prefix + loc.name + ' > '));
+        }
+    });
+    return flat;
+}
 
-    title.textContent = editId ? `${config.title} bearbeiten` : `${config.title} hinzufügen`;
-    editIdField.value = editId || '';
-    editTypeField.value = type;
+// === Dashboard ===
+async function loadDashboardAlerts() {
+    if (currentUser.role === 'standard') return;
+    try {
+        const objects = await api('/api/objects/search');
+        const alerts = [];
+        // Wir brauchen die Details für Wartungen - das wäre zu viele Requests.
+        // Für das MVP zeigen wir keine Dashboard-Wartungsalerts, sondern nur in der Detailansicht.
+        document.getElementById('maintenance-alerts').innerHTML = alerts.length
+            ? alerts.map(a => `<div class="alert">${a}</div>`).join('')
+            : '';
+    } catch (e) { console.error(e); }
+}
 
-    let fieldsHtml = '';
-    
-    // Falls Bearbeiten: Daten laden
-    let itemData = {};
-    if (editId) {
-        const pluralType = type === 'mitglied' ? 'mitglieder' : type === 'fahrzeug' ? 'fahrzeuge' : 'einsaetze';
-        itemData = currentData[pluralType].find(i => i.id === editId) || {};
+// === Search ===
+let searchTimeout;
+function debouncedSearch() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(doSearch, 300);
+}
+
+async function doSearch() {
+    const q = document.getElementById('search-input').value.trim();
+    if (!q) { document.getElementById('search-results').innerHTML = ''; return; }
+    try {
+        const results = await api('/api/objects/search?q=' + encodeURIComponent(q));
+        renderSearchResults(results);
+    } catch (e) { console.error(e); }
+}
+
+function renderSearchResults(results) {
+    const container = document.getElementById('search-results');
+    if (!results.length) { container.innerHTML = '<p>Keine Ergebnisse</p>'; return; }
+    container.innerHTML = results.map(r => `
+        <div class="card" onclick="openObject(${r.id})">
+            <img class="card-image" src="${r.title_image ? '/uploads/images/' + r.title_image : ''}" alt="" onerror="this.style.display='none'">
+            <div class="card-body">
+                <h4>${escapeHtml(r.designation)}</h4>
+                <div class="card-meta">
+                    <span class="badge badge-${r.status}">${formatStatus(r.status)}</span>
+                    <strong>${r.object_number}</strong>
+                    ${r.object_type ? '· ' + r.object_type : ''}
+                    ${r.location_name ? '· ' + escapeHtml(r.location_name) : ''}
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// === QR Scanner ===
+function startQrScan() {
+    showView('scanner');
+    if (!window.Html5Qrcode) {
+        alert('QR-Scanner wird geladen... bitte Seite neu laden.');
+        return;
+    }
+    scanner = new Html5Qrcode('qr-reader');
+    scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (decodedText) => {
+            stopQrScan();
+            handleQrResult(decodedText);
+        },
+        () => {}
+    ).catch(err => alert('Kamera-Fehler: ' + err));
+}
+
+function stopQrScan() {
+    if (scanner) { scanner.stop().catch(() => {}); scanner = null; }
+    showView('search');
+}
+
+function handleQrResult(text) {
+    // Erwartet: http://.../?q=FFW-00001 oder einfach FFW-00001
+    const match = text.match(/FFW-\d+/);
+    if (match) {
+        document.getElementById('search-input').value = match[0];
+        doSearch();
+    } else {
+        document.getElementById('search-input').value = text;
+        doSearch();
+    }
+}
+
+// === Object Detail ===
+async function openObject(id) {
+    try {
+        const obj = await api('/api/objects/' + id);
+        renderObjectDetail(obj);
+        showView('detail');
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+function renderObjectDetail(obj) {
+    const isStandard = currentUser.role === 'standard';
+    const isFull = !isStandard;
+
+    // Infobox
+    let infoboxHtml = `
+        <h3>${escapeHtml(obj.designation)}</h3>
+        ${obj.title_image ? `<img src="/uploads/images/${obj.title_image}" alt="Titelbild">` : ''}
+        <table>
+            <tr><td>ID</td><td><strong>${obj.object_number}</strong></td></tr>
+            <tr><td>Typ</td><td>${obj.object_type ? obj.object_type.name : '-'}</td></tr>
+            <tr><td>Hersteller</td><td>${obj.manufacturer ? obj.manufacturer.name : '-'}</td></tr>
+            <tr><td>Unterbringung</td><td>${obj.location ? escapeHtml(obj.location.name) : '-'}</td></tr>
+            ${isFull ? `<tr><td>Seriennummer</td><td>${escapeHtml(obj.serial_number || '-')}</td></tr>` : ''}
+            ${isFull ? `<tr><td>Anschaffung</td><td>${obj.acquisition_date || '-'}</td></tr>` : ''}
+            <tr><td>Status</td><td><span class="badge badge-${obj.status}">${formatStatus(obj.status)}</span></td></tr>
+        </table>
+        ${obj.qr_code ? `<div style="text-align:center;margin-top:1rem;"><img src="/uploads/qrcodes/${obj.qr_code.filename}" style="width:120px;"><br><small>${obj.object_number}</small></div>` : ''}
+        ${isFull ? `
+            <div style="margin-top:1rem;text-align:center;">
+                <a href="/api/objects/${obj.id}/sticker/print" target="_blank" class="btn-primary btn-small">🖨️ Aufkleber</a>
+            </div>
+        ` : ''}
+    `;
+    document.getElementById('detail-infobox').innerHTML = infoboxHtml;
+
+    // Content
+    let contentHtml = `
+        <div class="wiki-actions">
+            <button class="btn-secondary btn-small" onclick="showView('search')">← Zurück</button>
+            ${isFull ? `<button class="btn-primary btn-small" onclick="editObject(${obj.id})">✏️ Bearbeiten</button>` : ''}
+        </div>
+    `;
+
+    if (obj.info_text) {
+        contentHtml += `<h2>Information</h2><p>${escapeHtml(obj.info_text).replace(/\n/g, '<br>')}</p>`;
+    }
+    if (obj.usage_hints) {
+        contentHtml += `<h2>Hinweise zur Benutzung</h2><p>${escapeHtml(obj.usage_hints).replace(/\n/g, '<br>')}</p>`;
     }
 
-    config.fields.forEach(field => {
-        const value = itemData[field.name] || '';
-        
-        if (field.type === 'select') {
-            const options = field.options.map(opt => 
-                `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`
-            ).join('');
-            
-            fieldsHtml += `
-                <label for="${field.name}">${field.label}${field.required ? ' *' : ''}</label>
-                <select name="${field.name}" id="${field.name}" ${field.required ? 'required' : ''}>
-                    ${options}
-                </select>
-            `;
-        } else if (field.type === 'textarea') {
-            fieldsHtml += `
-                <label for="${field.name}">${field.label}${field.required ? ' *' : ''}</label>
-                <textarea name="${field.name}" id="${field.name}" ${field.required ? 'required' : ''} placeholder="${field.placeholder || ''}">${value}</textarea>
-            `;
+    // Dokumente (nur öffentliche für Standard)
+    let docs = obj.documents || [];
+    if (isStandard) docs = docs.filter(d => d.is_public);
+    if (docs.length) {
+        contentHtml += `<h2>Dokumente</h2><div class="doc-list">`;
+        contentHtml += docs.map(d => `<a href="/uploads/documents/${d.filename}" target="_blank">📄 ${escapeHtml(d.original_name)}</a>`).join('');
+        contentHtml += `</div>`;
+    }
+
+    if (isFull) {
+        // Bilder Zustand
+        if (obj.images && obj.images.length) {
+            contentHtml += `<h2>Bilder</h2><div class="gallery">`;
+            contentHtml += obj.images.map(img => `
+                <img src="/uploads/images/${img.filename}" title="${escapeHtml(img.caption || '')}" onclick="window.open(this.src)">
+            `).join('');
+            contentHtml += `</div>`;
+        }
+
+        // Wartung
+        if (obj.maintenances && obj.maintenances.length) {
+            contentHtml += `<h2>Wartung</h2>`;
+            obj.maintenances.forEach(m => {
+                const daysLeft = m.next_maintenance_date ? daysUntil(m.next_maintenance_date) : null;
+                contentHtml += `
+                    <div class="alert ${daysLeft !== null && daysLeft < 0 ? 'alert-danger' : ''}">
+                        <strong>Intervall:</strong> ${m.interval_days} Tage<br>
+                        <strong>Letzte Wartung:</strong> ${m.last_maintenance_date || '-'}<br>
+                        <strong>Nächste Wartung:</strong> ${m.next_maintenance_date || '-'}
+                        ${daysLeft !== null ? `<br><strong>Restzeit:</strong> ${daysLeft < 0 ? 'Überfällig!' : daysLeft + ' Tage'}` : ''}
+                        ${m.notes ? '<br>' + escapeHtml(m.notes) : ''}
+                    </div>
+                `;
+            });
+        }
+
+        // Reparaturen
+        if (obj.repairs && obj.repairs.length) {
+            contentHtml += `<h2>Reparaturverlauf</h2><table><thead><tr><th>Datum</th><th>Beschreibung</th><th>Kosten</th></tr></thead><tbody>`;
+            contentHtml += obj.repairs.map(r => `
+                <tr><td>${r.date}</td><td>${escapeHtml(r.description)}</td><td>${r.cost ? r.cost.toFixed(2) + ' €' : '-'}</td></tr>
+            `).join('');
+            contentHtml += `</tbody></table>`;
+        }
+    }
+
+    document.getElementById('detail-content').innerHTML = contentHtml;
+}
+
+function daysUntil(dateStr) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const target = new Date(dateStr);
+    return Math.ceil((target - today) / (1000 * 60 * 60 * 24));
+}
+
+// === Object Form ===
+async function saveObject(e) {
+    e.preventDefault();
+    const id = document.getElementById('edit-object-id').value;
+    const data = {
+        object_type_id: parseInt(document.getElementById('obj-type').value) || null,
+        designation: document.getElementById('obj-designation').value,
+        serial_number: document.getElementById('obj-serial').value || null,
+        manufacturer_id: parseInt(document.getElementById('obj-manufacturer').value) || null,
+        location_id: parseInt(document.getElementById('obj-location').value) || null,
+        info_text: document.getElementById('obj-info').value || null,
+        usage_hints: document.getElementById('obj-hints').value || null,
+        acquisition_date: document.getElementById('obj-acquisition').value || null,
+        status: document.getElementById('obj-status').value,
+        maintenance_interval_days: parseInt(document.getElementById('obj-maint-days').value) || null,
+        maintenance_notes: document.getElementById('obj-maint-notes').value || null
+    };
+
+    // Neuer Hersteller?
+    const newManu = document.getElementById('new-manufacturer').value.trim();
+    if (newManu && !data.manufacturer_id) {
+        try {
+            const m = await api('/api/manufacturers', { method: 'POST', body: JSON.stringify({ name: newManu }) });
+            data.manufacturer_id = m.id;
+        } catch (e) { alert('Hersteller konnte nicht angelegt werden'); return; }
+    }
+
+    try {
+        const url = id ? '/api/objects/' + id : '/api/objects';
+        const method = id ? 'PUT' : 'POST';
+        const obj = await api(url, { method, body: JSON.stringify(data) });
+
+        // Titelbild upload
+        const titleInput = document.getElementById('obj-title-image');
+        if (titleInput && titleInput.files.length) {
+            const fd = new FormData();
+            fd.append('file', titleInput.files[0]);
+            await uploadFile('/api/objects/' + obj.id + '/title-image', fd);
+        }
+
+        alert('Gespeichert!');
+        showView('search');
+        document.getElementById('search-input').value = obj.object_number;
+        doSearch();
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+async function editObject(id) {
+    try {
+        const obj = await api('/api/objects/' + id);
+        document.getElementById('edit-object-id').value = obj.id;
+        document.getElementById('obj-designation').value = obj.designation;
+        document.getElementById('obj-type').value = obj.object_type ? obj.object_type.id : '';
+        document.getElementById('obj-serial').value = obj.serial_number || '';
+        document.getElementById('obj-manufacturer').value = obj.manufacturer ? obj.manufacturer.id : '';
+        document.getElementById('obj-location').value = obj.location ? obj.location.id : '';
+        document.getElementById('obj-status').value = obj.status;
+        document.getElementById('obj-acquisition').value = obj.acquisition_date || '';
+        document.getElementById('obj-info').value = obj.info_text || '';
+        document.getElementById('obj-hints').value = obj.usage_hints || '';
+        document.getElementById('new-manufacturer').value = '';
+
+        if (obj.maintenances && obj.maintenances[0]) {
+            document.getElementById('obj-maint-days').value = obj.maintenances[0].interval_days;
+            document.getElementById('obj-maint-notes').value = obj.maintenances[0].notes || '';
         } else {
-            fieldsHtml += `
-                <label for="${field.name}">${field.label}${field.required ? ' *' : ''}</label>
-                <input type="${field.type}" name="${field.name}" id="${field.name}" value="${value}" ${field.required ? 'required' : ''} placeholder="${field.placeholder || ''}">
-            `;
+            document.getElementById('obj-maint-days').value = '';
+            document.getElementById('obj-maint-notes').value = '';
         }
-    });
 
-    formFields.innerHTML = fieldsHtml;
-    modal.style.display = 'block';
+        document.getElementById('form-title').textContent = 'Objekt bearbeiten';
+        showView('edit-object');
+    } catch (e) { alert('Fehler: ' + e.message); }
 }
 
-function closeModal() {
-    document.getElementById('modal').style.display = 'none';
+// Füge Titelbild-Input dynamisch zum Formular hinzu
+(function setupForm() {
+    const formGrid = document.querySelector('#object-form .form-grid');
+    const div = document.createElement('div');
+    div.innerHTML = `<label>Titelbild</label><input type="file" id="obj-title-image" accept="image/*">`;
+    formGrid.appendChild(div);
+})();
+
+// === Admin ===
+function showAdminTab(tab) {
+    document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById('admin-users').classList.toggle('hidden', tab !== 'users');
+    document.getElementById('admin-masterdata').classList.toggle('hidden', tab !== 'masterdata');
+    if (tab === 'users') loadUsers();
+    if (tab === 'masterdata') loadMasterDataLists();
 }
 
-// Schließen beim Klick außerhalb
-window.onclick = function(event) {
-    const modal = document.getElementById('modal');
-    if (event.target === modal) {
-        closeModal();
-    }
-};
-
-// --- Speichern ---
-async function saveForm(event) {
-    event.preventDefault();
-    
-    const editId = document.getElementById('edit-id').value;
-    const type = document.getElementById('edit-type').value;
-    const pluralType = type === 'mitglied' ? 'mitglieder' : type === 'fahrzeug' ? 'fahrzeuge' : 'einsaetze';
-    
-    const formData = new FormData(event.target);
-    const data = {};
-    
-    formConfig[type].fields.forEach(field => {
-        let value = formData.get(field.name);
-        if (field.type === 'number' && value) {
-            value = parseInt(value);
-        }
-        data[field.name] = value;
-    });
-
-    const url = editId 
-        ? `${API_URL}/api/${pluralType}/${editId}` 
-        : `${API_URL}/api/${pluralType}`;
-    
-    const method = editId ? 'PUT' : 'POST';
-
+async function loadUsers() {
     try {
-        const response = await fetch(url, {
-            method: method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Unbekannter Fehler');
-        }
-
-        closeModal();
-        await loadData(pluralType);
-    } catch (error) {
-        console.error('Fehler beim Speichern:', error);
-        alert(`Fehler beim Speichern: ${error.message}`);
-    }
+        const users = await api('/api/users');
+        document.getElementById('users-list').innerHTML = `
+            <table><thead><tr><th>Name</th><th>Benutzer</th><th>Rolle</th><th>Aktiv</th><th>Aktionen</th></tr></thead>
+            <tbody>${users.map(u => `
+                <tr>
+                    <td>${escapeHtml(u.full_name)}</td>
+                    <td>${escapeHtml(u.username)}</td>
+                    <td>${u.role}</td>
+                    <td>${u.is_active ? 'Ja' : 'Nein'}</td>
+                    <td>
+                        <button class="btn-primary btn-small" onclick="editUserPrompt(${u.id}, '${u.username}', '${u.full_name}', '${u.email}', '${u.role}')">Bearbeiten</button>
+                        <button class="btn-primary btn-small btn-delete" onclick="deleteUser(${u.id})">Löschen</button>
+                    </td>
+                </tr>
+            `).join('')}</tbody></table>
+        `;
+    } catch (e) { console.error(e); }
 }
 
-// --- Bearbeiten ---
-function editItem(type, id) {
-    openModal(type.slice(0, -1), id); // "mitglieder" -> "mitglied"
+async function deleteUser(id) {
+    if (!confirm('Benutzer wirklich löschen?')) return;
+    await api('/api/users/' + id, { method: 'DELETE' });
+    loadUsers();
 }
 
-// --- Löschen ---
-async function deleteItem(type, id) {
-    if (!confirm('Möchten Sie diesen Eintrag wirklich löschen?')) return;
+function showUserForm() {
+    const username = prompt('Benutzername:');
+    if (!username) return;
+    const fullName = prompt('Vollständiger Name:');
+    const password = prompt('Passwort:');
+    const role = prompt('Rolle (standard/erweitert/verwaltung/admin):', 'standard');
+    api('/api/users', {
+        method: 'POST',
+        body: JSON.stringify({ username, full_name: fullName, password, role, is_active: true })
+    }).then(() => loadUsers()).catch(e => alert(e.message));
+}
 
-    try {
-        const response = await fetch(`${API_URL}/api/${type}/${id}`, {
-            method: 'DELETE'
-        });
+function editUserPrompt(id, username, fullName, email, role) {
+    const newName = prompt('Name:', fullName);
+    const newRole = prompt('Rolle:', role);
+    const newPass = prompt('Neues Passwort (leer = unverändert):');
+    const data = { full_name: newName, role: newRole };
+    if (newPass) data.password = newPass;
+    api('/api/users/' + id, { method: 'PUT', body: JSON.stringify(data) })
+        .then(() => loadUsers()).catch(e => alert(e.message));
+}
 
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+async function loadMasterDataLists() {
+    const manus = await api('/api/manufacturers');
+    document.getElementById('manufacturers-list').innerHTML = manus.map(m => `
+        <span class="badge badge-reserve" style="margin:0.2rem;display:inline-block">${escapeHtml(m.name)}</span>
+    `).join('') || '<p>Keine Hersteller</p>';
 
-        await loadData(type);
-    } catch (error) {
-        console.error('Fehler beim Löschen:', error);
-        alert('Fehler beim Löschen des Eintrags.');
-    }
+    const locs = await api('/api/locations');
+    document.getElementById('locations-list').innerHTML = renderLocationTree(locs);
+}
+
+function renderLocationTree(locs, level = 0) {
+    if (!locs || !locs.length) return '';
+    let html = '<ul style="margin-left:' + (level * 20) + 'px">';
+    locs.forEach(l => {
+        html += `<li>${escapeHtml(l.name)} (${l.location_type})${renderLocationTree(l.children, level + 1)}</li>`;
+    });
+    html += '</ul>';
+    return html;
+}
+
+// === Utils ===
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatStatus(s) {
+    const map = {
+        'in_benutzung': 'In Benutzung',
+        'in_reparatur': 'In Reparatur',
+        'ausgemustert': 'Ausgemustert',
+        'reserve': 'Reserve',
+        'zur_reinigung': 'Zur Reinigung'
+    };
+    return map[s] || s;
+}
+
+// === Init ===
+if (token) {
+    initApp();
 }

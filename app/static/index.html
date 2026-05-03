@@ -3,118 +3,177 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Feuerwehr Datenbank</title>
+    <title>Feuerwehr Inventar</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
 </head>
 <body>
-    <header>
-        <h1>🚒 Feuerwehr Datenbank</h1>
-        <nav id="main-nav">
-            <button class="nav-btn active" data-tab="mitglieder">Mitglieder</button>
-            <button class="nav-btn" data-tab="fahrzeuge">Fahrzeuge</button>
-            <button class="nav-btn" data-tab="einsaetze">Einsätze</button>
-        </nav>
-    </header>
-
-    <main>
-        <!-- Mitglieder Tab -->
-        <section id="mitglieder" class="tab-content active">
-            <div class="section-header">
-                <h2>Mitglieder</h2>
-                <button class="btn-primary" onclick="openModal('mitglied')">+ Mitglied hinzufügen</button>
-            </div>
-            <div class="search-box">
-                <input type="text" id="search-mitglieder" placeholder="Suchen..." oninput="filterTable('mitglieder')">
-            </div>
-            <div class="table-container">
-                <table id="table-mitglieder">
-                    <thead>
-                        <tr>
-                            <th>Dienstnr.</th>
-                            <th>Name</th>
-                            <th>Funktion</th>
-                            <th>Status</th>
-                            <th>Telefon</th>
-                            <th>Aktionen</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- Fahrzeuge Tab -->
-        <section id="fahrzeuge" class="tab-content">
-            <div class="section-header">
-                <h2>Fahrzeuge</h2>
-                <button class="btn-primary" onclick="openModal('fahrzeug')">+ Fahrzeug hinzufügen</button>
-            </div>
-            <div class="search-box">
-                <input type="text" id="search-fahrzeuge" placeholder="Suchen..." oninput="filterTable('fahrzeuge')">
-            </div>
-            <div class="table-container">
-                <table id="table-fahrzeuge">
-                    <thead>
-                        <tr>
-                            <th>Kennzeichen</th>
-                            <th>Bezeichnung</th>
-                            <th>Status</th>
-                            <th>Nächste Inspektion</th>
-                            <th>Aktionen</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- Einsätze Tab -->
-        <section id="einsaetze" class="tab-content">
-            <div class="section-header">
-                <h2>Einsätze</h2>
-                <button class="btn-primary" onclick="openModal('einsatz')">+ Einsatz erfassen</button>
-            </div>
-            <div class="search-box">
-                <input type="text" id="search-einsaetze" placeholder="Suchen..." oninput="filterTable('einsaetze')">
-            </div>
-            <div class="table-container">
-                <table id="table-einsaetze">
-                    <thead>
-                        <tr>
-                            <th>Nr.</th>
-                            <th>Alarmierung</th>
-                            <th>Stichwort</th>
-                            <th>Adresse</th>
-                            <th>Status</th>
-                            <th>Aktionen</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-        </section>
-    </main>
-
-    <!-- Modal -->
-    <div id="modal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeModal()">&times;</span>
-            <h2 id="modal-title">Formular</h2>
-            <form id="modal-form" onsubmit="saveForm(event)">
-                <input type="hidden" id="edit-id">
-                <input type="hidden" id="edit-type">
-                <div id="form-fields"></div>
-                <div class="form-actions">
-                    <button type="button" class="btn-secondary" onclick="closeModal()">Abbrechen</button>
-                    <button type="submit" class="btn-primary">Speichern</button>
-                </div>
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen">
+        <div class="login-box">
+            <h1>🚒 Feuerwehr Inventar</h1>
+            <form id="login-form" onsubmit="handleLogin(event)">
+                <label for="login-user">Benutzername</label>
+                <input type="text" id="login-user" required autofocus>
+                <label for="login-pass">Passwort</label>
+                <input type="password" id="login-pass" required>
+                <button type="submit" class="btn-primary">Anmelden</button>
             </form>
+            <p class="login-hint">Standard-Login: admin / admin</p>
         </div>
     </div>
 
-    <footer>
-        <p>Feuerwehr Datenbank v1.0</p>
-    </footer>
+    <!-- App Screen -->
+    <div id="app-screen" class="screen hidden">
+        <header class="app-header">
+            <h1 onclick="showView('dashboard')">🚒 Inventar</h1>
+            <div class="header-actions">
+                <span id="user-name"></span>
+                <button class="btn-icon" onclick="toggleMenu()" title="Menü">☰</button>
+            </div>
+        </header>
+
+        <nav id="mobile-menu" class="mobile-menu hidden">
+            <button onclick="showView('dashboard')">🏠 Start</button>
+            <button onclick="showView('search')">🔍 Suche</button>
+            <button id="nav-new-object" class="hidden" onclick="showView('edit-object')">➕ Objekt anlegen</button>
+            <button id="nav-admin" class="hidden" onclick="showView('admin')">⚙️ Verwaltung</button>
+            <button onclick="logout()">🚪 Abmelden</button>
+        </nav>
+
+        <main id="main-content">
+            <!-- Dashboard -->
+            <div id="view-dashboard" class="view">
+                <h2>Willkommen</h2>
+                <div class="dashboard-grid">
+                    <div class="dash-card" onclick="showView('search')">
+                        <div class="dash-icon">🔍</div>
+                        <h3>Objekt suchen</h3>
+                        <p>Nach ID, Name oder QR-Code</p>
+                    </div>
+                    <div class="dash-card hidden" id="dash-new" onclick="showView('edit-object')">
+                        <div class="dash-icon">➕</div>
+                        <h3>Neues Objekt</h3>
+                        <p>Gerät oder Ausrüstung anlegen</p>
+                    </div>
+                    <div class="dash-card" onclick="startQrScan()">
+                        <div class="dash-icon">📷</div>
+                        <h3>QR-Code scannen</h3>
+                        <p>Direkt zum Objekt</p>
+                    </div>
+                </div>
+                <div id="maintenance-alerts" class="alerts"></div>
+            </div>
+
+            <!-- Search -->
+            <div id="view-search" class="view hidden">
+                <div class="search-header">
+                    <input type="text" id="search-input" placeholder="Suche nach Bezeichnung, ID oder Seriennummer..." oninput="debouncedSearch()">
+                    <button class="btn-secondary" onclick="startQrScan()">📷 QR</button>
+                </div>
+                <div id="search-results" class="card-list"></div>
+            </div>
+
+            <!-- QR Scanner -->
+            <div id="view-scanner" class="view hidden">
+                <h2>QR-Code scannen</h2>
+                <div id="qr-reader"></div>
+                <button class="btn-secondary" onclick="stopQrScan()">Abbrechen</button>
+            </div>
+
+            <!-- Object Detail (Wikipedia Style) -->
+            <div id="view-detail" class="view hidden">
+                <div class="wiki-container">
+                    <aside class="wiki-infobox" id="detail-infobox"></aside>
+                    <article class="wiki-content" id="detail-content"></article>
+                </div>
+            </div>
+
+            <!-- Object Form -->
+            <div id="view-edit-object" class="view hidden">
+                <h2 id="form-title">Objekt anlegen</h2>
+                <form id="object-form" onsubmit="saveObject(event)">
+                    <input type="hidden" id="edit-object-id">
+                    <div class="form-grid">
+                        <div>
+                            <label>Bezeichnung *</label>
+                            <input type="text" id="obj-designation" required>
+                        </div>
+                        <div>
+                            <label>Typ *</label>
+                            <select id="obj-type" required></select>
+                        </div>
+                        <div>
+                            <label>Hersteller</label>
+                            <select id="obj-manufacturer"><option value="">-- Auswählen --</option></select>
+                            <input type="text" id="new-manufacturer" placeholder="Neuer Hersteller...">
+                        </div>
+                        <div>
+                            <label>Seriennummer</label>
+                            <input type="text" id="obj-serial">
+                        </div>
+                        <div>
+                            <label>Unterbringung</label>
+                            <select id="obj-location"><option value="">-- Auswählen --</option></select>
+                        </div>
+                        <div>
+                            <label>Status</label>
+                            <select id="obj-status">
+                                <option value="in_benutzung">In Benutzung</option>
+                                <option value="in_reparatur">In Reparatur</option>
+                                <option value="ausgemustert">Ausgemustert</option>
+                                <option value="reserve">Reserve</option>
+                                <option value="zur_reinigung">Zur Reinigung</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label>Anschaffungsdatum</label>
+                            <input type="date" id="obj-acquisition">
+                        </div>
+                        <div>
+                            <label>Wartungsintervall (Tage)</label>
+                            <input type="number" id="obj-maint-days" min="1">
+                        </div>
+                    </div>
+                    <div>
+                        <label>Infotext</label>
+                        <textarea id="obj-info" rows="4"></textarea>
+                    </div>
+                    <div>
+                        <label>Hinweise / Tipps zur Benutzung</label>
+                        <textarea id="obj-hints" rows="3"></textarea>
+                    </div>
+                    <div>
+                        <label>Wartungsnotizen</label>
+                        <textarea id="obj-maint-notes" rows="2"></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn-secondary" onclick="showView('search')">Abbrechen</button>
+                        <button type="submit" class="btn-primary">Speichern</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Admin -->
+            <div id="view-admin" class="view hidden">
+                <h2>Verwaltung</h2>
+                <div class="admin-tabs">
+                    <button class="admin-tab active" onclick="showAdminTab('users')">Benutzer</button>
+                    <button class="admin-tab" onclick="showAdminTab('masterdata')">Stammdaten</button>
+                </div>
+                <div id="admin-users" class="admin-panel">
+                    <button class="btn-primary" onclick="showUserForm()">+ Benutzer</button>
+                    <div id="users-list" class="table-container"></div>
+                </div>
+                <div id="admin-masterdata" class="admin-panel hidden">
+                    <h3>Hersteller</h3>
+                    <div id="manufacturers-list"></div>
+                    <h3>Standorte</h3>
+                    <div id="locations-list"></div>
+                </div>
+            </div>
+        </main>
+    </div>
 
     <script src="/static/js/app.js"></script>
 </body>

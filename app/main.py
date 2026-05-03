@@ -1,72 +1,548 @@
-from fastapi import FastAPI, Depends, HTTPException, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-from sqlalchemy.orm import Session
-from pydantic import BaseModel
-from typing import List, Optional
 import os
+import shutil
+import uuid
+from datetime import datetime, timedelta
+from typing import List, Optional
 
-from app.database import get_db, engine
-from app.database import Mitglied, Fahrzeug, Einsatz, EinsatzMitglied, EinsatzFahrzeug
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, FileResponse
+from sqlalchemy.orm import Session
+from sqlalchemy import or_, func
 
-app = FastAPI(title="Feuerwehr Datenbank", version="1.0.0")
+from app.database import get_db, engine, Base
+from app.models import (
+    User, UserRole, ObjectType, Manufacturer, Location, InventoryObject,
+    ObjectImage, Maintenance, Repair, Document, QRCode, ObjectStatus
+)
+from app.schemas import (
+    Token, UserLogin, UserCreate, UserResponse, UserUpdate,
+    ObjectTypeCreate, ObjectTypeResponse, ManufacturerCreate, ManufacturerResponse,
+    LocationCreate, LocationResponse, InventoryObjectCreate, InventoryObjectUpdate,
+    InventoryObjectPublicResponse, InventoryObjectFullResponse,
+    MaintenanceCreate, MaintenanceResponse, RepairCreate, RepairResponse,
+    DocumentResponse, SearchResult
+)
+from app.auth import (
+    verify_password, create_access_token, get_current_user,
+    require_admin, require_verwaltung, require_erweitert, require_any_user,
+    get_password_hash, create_default_admin
+)
 
-# Statische Dateien (Frontend)
+# QR Code
+import qrcode
+from PIL import Image, ImageDraw, ImageFont
+
+# --- FastAPI App ---
+app = FastAPI(title="Feuerwehr Inventar", version="2.0.0")
+
+# Statische Dateien
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-# --- Pydantic Schemas ---
+# Datenbanktabellen erstellen
+Base.metadata.create_all(bind=engine)
 
-class MitgliedCreate(BaseModel):
-    dienstnummer: str
-    vorname: str
-    nachname: str
-    geburtsdatum: Optional[str] = None
-    eintrittsdatum: Optional[str] = None
-    funktion: Optional[str] = None
-    status: Optional[str] = "aktiv"
-    telefon: Optional[str] = None
-    email: Optional[str] = None
-    adresse: Optional[str] = None
-    notizen: Optional[str] = None
+# Upload-Verzeichnisse sicherstellen
+for d in ["uploads/images", "uploads/documents", "uploads/qrcodes"]:
+    os.makedirs(d, exist_ok=True)
 
-class MitgliedResponse(MitgliedCreate):
-    id: int
-    class Config:
-        from_attributes = True
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
-class FahrzeugCreate(BaseModel):
-    kennzeichen: str
-    bezeichnung: str
-    marke: Optional[str] = None
-    typ: Optional[str] = None
-    baujahr: Optional[int] = None
-    sitzplaetze: Optional[int] = None
-    status: Optional[str] = "einsatzbereit"
-    letzte_inspektion: Optional[str] = None
-    naechste_inspektion: Optional[str] = None
-    notizen: Optional[str] = None
+# Default-Admin erstellen (beim ersten Start)
+@app.on_event("startup")
+def startup():
+    db = next(get_db())
+    create_default_admin(db)
+    # Standard-Stammdaten anlegen
+    if not db.query(ObjectType).first():
+        for name in ["Fahrzeug", "Gebrauchsgegenstand", "Verbrauchsgegenstand", "Ausrüstung"]:
+            db.add(ObjectType(name=name))
+    if not db.query(Location).first():
+        db.add(Location(name="Gerätehaus", location_type="Gerätehaus"))
+    db.commit()
 
-class FahrzeugResponse(FahrzeugCreate):
-    id: int
-    class Config:
-        from_attributes = True
+# --- Hilfsfunktionen ---
 
-class EinsatzCreate(BaseModel):
-    einsatznummer: str
-    stichwort: str
-    beschreibung: Optional[str] = None
-    adresse: str
-    ort: Optional[str] = None
-    melder: Optional[str] = None
-    status: Optional[str] = "offen"
+def generate_object_number(db: Session) -> str:
+    # Finde die höchste ID und generiere daraus eine Nummer
+    last = db.query(InventoryObject).order_by(InventoryObject.id.desc()).first()
+    next_id = (last.id + 1) if last else 1
+    return f"FFW-{next_id:05d}"
 
-class EinsatzResponse(EinsatzCreate):
-    id: int
-    alarmierung: Optional[str] = None
-    class Config:
-        from_attributes = True
+def generate_qr_code(object_number: str) -> str:
+    url = f"{BASE_URL}/?q={object_number}"
+    qr = qrcode.QRCode(version=1, box_size=10, border=2)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    filename = f"qr_{object_number}.png"
+    filepath = f"uploads/qrcodes/{filename}"
+    img.save(filepath)
+    return filename
 
-# --- Frontend Route ---
+def generate_sticker(object_number: str, designation: str) -> str:
+    # Erstelle ein druckbares Bild (Aufkleber 50x25mm bei 300dpi ~ 590x295px)
+    width, height = 590, 295
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+    
+    # Versuche eine Schrift zu laden
+    try:
+        font_large = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
+        font_medium = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 24)
+        font_small = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 18)
+    except:
+        font_large = ImageFont.load_default()
+        font_medium = font_large
+        font_small = font_large
+    
+    # QR-Code laden und einfügen
+    qr_path = f"uploads/qrcodes/qr_{object_number}.png"
+    if os.path.exists(qr_path):
+        qr_img = Image.open(qr_path)
+        qr_img = qr_img.resize((240, 240))
+        img.paste(qr_img, (20, 20))
+    
+    # Text
+    draw.text((280, 40), designation, fill="black", font=font_large)
+    draw.text((280, 100), f"ID: {object_number}", fill="black", font=font_medium)
+    draw.text((280, 150), "Scannen für Details", fill="gray", font=font_small)
+    
+    # Rahmen
+    draw.rectangle([0, 0, width-1, height-1], outline="black", width=3)
+    
+    filename = f"sticker_{object_number}.png"
+    filepath = f"uploads/qrcodes/{filename}"
+    img.save(filepath)
+    return filename
+
+def save_upload(file: UploadFile, directory: str) -> str:
+    ext = os.path.splitext(file.filename)[1]
+    filename = f"{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join(directory, filename)
+    with open(filepath, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    return filename
+
+def determine_file_type(filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    if ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
+        return "image"
+    elif ext == ".pdf":
+        return "pdf"
+    elif ext in [".txt", ".md"]:
+        return "text"
+    return "other"
+
+# --- Auth Endpoints ---
+
+@app.post("/api/auth/login", response_model=Token)
+def login(data: UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == data.username).first()
+    if not user or not verify_password(data.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Ungültige Anmeldedaten")
+    token = create_access_token({"sub": user.username})
+    return {"access_token": token, "token_type": "bearer"}
+
+@app.get("/api/auth/me", response_model=UserResponse)
+def me(current_user: User = Depends(require_any_user)):
+    return current_user
+
+# --- User Management (nur Admin) ---
+
+@app.get("/api/users", response_model=List[UserResponse])
+def list_users(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    return db.query(User).all()
+
+@app.post("/api/users", response_model=UserResponse)
+def create_user(data: UserCreate, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    if db.query(User).filter(User.username == data.username).first():
+        raise HTTPException(status_code=400, detail="Benutzername bereits vergeben")
+    user = User(
+        username=data.username,
+        full_name=data.full_name,
+        email=data.email,
+        hashed_password=get_password_hash(data.password),
+        role=data.role,
+        is_active=data.is_active
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+@app.put("/api/users/{user_id}", response_model=UserResponse)
+def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+    for key, value in data.model_dump(exclude_unset=True).items():
+        if key == "password" and value:
+            setattr(user, "hashed_password", get_password_hash(value))
+        else:
+            setattr(user, key, value)
+    db.commit()
+    db.refresh(user)
+    return user
+
+@app.delete("/api/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+    db.delete(user)
+    db.commit()
+    return {"ok": True}
+
+# --- Stammdaten ---
+
+@app.get("/api/object-types", response_model=List[ObjectTypeResponse])
+def list_object_types(db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    return db.query(ObjectType).all()
+
+@app.post("/api/object-types", response_model=ObjectTypeResponse)
+def create_object_type(data: ObjectTypeCreate, db: Session = Depends(get_db), user: User = Depends(require_verwaltung)):
+    ot = ObjectType(name=data.name)
+    db.add(ot)
+    db.commit()
+    db.refresh(ot)
+    return ot
+
+@app.get("/api/manufacturers", response_model=List[ManufacturerResponse])
+def list_manufacturers(db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    return db.query(Manufacturer).all()
+
+@app.post("/api/manufacturers", response_model=ManufacturerResponse)
+def create_manufacturer(data: ManufacturerCreate, db: Session = Depends(get_db), user: User = Depends(require_erweitert)):
+    m = Manufacturer(name=data.name)
+    db.add(m)
+    db.commit()
+    db.refresh(m)
+    return m
+
+@app.get("/api/locations", response_model=List[LocationResponse])
+def list_locations(db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    return db.query(Location).filter(Location.parent_id == None).all()
+
+@app.post("/api/locations", response_model=LocationResponse)
+def create_location(data: LocationCreate, db: Session = Depends(get_db), user: User = Depends(require_erweitert)):
+    loc = Location(name=data.name, location_type=data.location_type, parent_id=data.parent_id)
+    db.add(loc)
+    db.commit()
+    db.refresh(loc)
+    return loc
+
+# --- Objekte ---
+
+@app.get("/api/objects/search", response_model=List[SearchResult])
+def search_objects(q: Optional[str] = None, db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    query = db.query(InventoryObject)
+    if q:
+        query = query.filter(
+            or_(
+                InventoryObject.designation.ilike(f"%{q}%"),
+                InventoryObject.object_number.ilike(f"%{q}%"),
+                InventoryObject.serial_number.ilike(f"%{q}%")
+            )
+        )
+    objects = query.order_by(InventoryObject.designation).all()
+    
+    result = []
+    for obj in objects:
+        result.append(SearchResult(
+            id=obj.id,
+            designation=obj.designation,
+            object_number=obj.object_number,
+            object_type=obj.object_type.name if obj.object_type else None,
+            status=obj.status.value if obj.status else None,
+            title_image=obj.title_image,
+            location_name=obj.location.name if obj.location else None
+        ))
+    return result
+
+@app.get("/api/objects", response_model=List[SearchResult])
+def list_objects(db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    return search_objects(q=None, db=db, user=user)
+
+@app.post("/api/objects", response_model=InventoryObjectFullResponse)
+def create_object(
+    data: InventoryObjectCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_erweitert)
+):
+    obj = InventoryObject(
+        object_type_id=data.object_type_id,
+        designation=data.designation,
+        object_number="TEMP",  # Wird gleich aktualisiert
+        serial_number=data.serial_number,
+        manufacturer_id=data.manufacturer_id,
+        location_id=data.location_id,
+        info_text=data.info_text,
+        usage_hints=data.usage_hints,
+        acquisition_date=data.acquisition_date,
+        status=data.status,
+        created_by_id=user.id
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    
+    # Eindeutige Nummer generieren
+    obj.object_number = f"FFW-{obj.id:05d}"
+    db.commit()
+    
+    # QR-Code generieren
+    qr_filename = generate_qr_code(obj.object_number)
+    qr = QRCode(object_id=obj.id, filename=qr_filename)
+    db.add(qr)
+    db.commit()
+    
+    # Wartung anlegen falls angegeben
+    if data.maintenance_interval_days:
+        next_date = None
+        if data.acquisition_date:
+            d = datetime.strptime(data.acquisition_date, "%Y-%m-%d") + timedelta(days=data.maintenance_interval_days)
+            next_date = d.strftime("%Y-%m-%d")
+        maint = Maintenance(
+            object_id=obj.id,
+            interval_days=data.maintenance_interval_days,
+            last_maintenance_date=data.acquisition_date,
+            next_maintenance_date=next_date,
+            notes=data.maintenance_notes
+        )
+        db.add(maint)
+        db.commit()
+    
+    db.refresh(obj)
+    return obj
+
+@app.get("/api/objects/{object_id}")
+def get_object(object_id: int, db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    
+    # Standardnutzer bekommt reduzierte Daten
+    if user.role == UserRole.STANDARD:
+        # Filtere Dokumente: nur öffentliche
+        public_docs = [d for d in obj.documents if d.is_public]
+        return InventoryObjectPublicResponse(
+            id=obj.id,
+            object_type=ObjectTypeResponse(id=obj.object_type.id, name=obj.object_type.name) if obj.object_type else None,
+            designation=obj.designation,
+            object_number=obj.object_number,
+            manufacturer=ManufacturerResponse(id=obj.manufacturer.id, name=obj.manufacturer.name) if obj.manufacturer else None,
+            location=LocationResponse(id=obj.location.id, name=obj.location.name, location_type=obj.location.location_type, parent_id=obj.location.parent_id) if obj.location else None,
+            title_image=obj.title_image,
+            info_text=obj.info_text,
+            usage_hints=obj.usage_hints,
+            documents=[DocumentResponse.from_orm(d) for d in public_docs],
+            qr_code=QRCodeResponse(id=obj.qr_code.id, filename=obj.qr_code.filename, created_at=obj.qr_code.created_at) if obj.qr_code else None
+        )
+    
+    return InventoryObjectFullResponse.model_validate(obj)
+
+@app.put("/api/objects/{object_id}", response_model=InventoryObjectFullResponse)
+def update_object(
+    object_id: int,
+    data: InventoryObjectUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_erweitert)
+):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(obj, key, value)
+    obj.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+@app.delete("/api/objects/{object_id}")
+def delete_object(object_id: int, db: Session = Depends(get_db), user: User = Depends(require_erweitert)):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    
+    # Lösche zugehörige Dateien
+    for img in obj.images:
+        path = f"uploads/images/{img.filename}"
+        if os.path.exists(path):
+            os.remove(path)
+    for doc in obj.documents:
+        path = f"uploads/documents/{doc.filename}"
+        if os.path.exists(path):
+            os.remove(path)
+    if obj.title_image:
+        path = f"uploads/images/{obj.title_image}"
+        if os.path.exists(path):
+            os.remove(path)
+    if obj.qr_code:
+        for f in [obj.qr_code.filename, f"sticker_{obj.object_number}.png"]:
+            path = f"uploads/qrcodes/{f}"
+            if os.path.exists(path):
+                os.remove(path)
+    
+    db.delete(obj)
+    db.commit()
+    return {"ok": True}
+
+# --- Bilder ---
+
+@app.post("/api/objects/{object_id}/images")
+def upload_image(
+    object_id: int,
+    caption: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_erweitert)
+):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    filename = save_upload(file, "uploads/images")
+    img = ObjectImage(object_id=object_id, filename=filename, caption=caption)
+    db.add(img)
+    db.commit()
+    return {"ok": True, "filename": filename}
+
+@app.post("/api/objects/{object_id}/title-image")
+def upload_title_image(
+    object_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_erweitert)
+):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    filename = save_upload(file, "uploads/images")
+    obj.title_image = filename
+    db.commit()
+    return {"ok": True, "filename": filename}
+
+# --- Wartung ---
+
+@app.post("/api/objects/{object_id}/maintenance", response_model=MaintenanceResponse)
+def add_maintenance(
+    object_id: int,
+    data: MaintenanceCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_verwaltung)
+):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    maint = Maintenance(**data.model_dump(), object_id=object_id)
+    db.add(maint)
+    db.commit()
+    db.refresh(maint)
+    return maint
+
+# --- Reparaturen ---
+
+@app.post("/api/objects/{object_id}/repairs", response_model=RepairResponse)
+def add_repair(
+    object_id: int,
+    data: RepairCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_verwaltung)
+):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    repair = Repair(**data.model_dump(), object_id=object_id)
+    db.add(repair)
+    db.commit()
+    db.refresh(repair)
+    return repair
+
+# --- Dokumente ---
+
+@app.post("/api/objects/{object_id}/documents")
+def upload_document(
+    object_id: int,
+    is_public: bool = Form(True),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_erweitert)
+):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    filename = save_upload(file, "uploads/documents")
+    doc = Document(
+        object_id=object_id,
+        filename=filename,
+        original_name=file.filename,
+        file_type=determine_file_type(file.filename),
+        is_public=is_public,
+        uploaded_by_id=user.id
+    )
+    db.add(doc)
+    db.commit()
+    return {"ok": True, "filename": filename}
+
+# --- QR Code & Sticker ---
+
+@app.get("/api/objects/{object_id}/qr")
+def get_qr_code(object_id: int, db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj or not obj.qr_code:
+        raise HTTPException(status_code=404, detail="QR-Code nicht gefunden")
+    return FileResponse(f"uploads/qrcodes/{obj.qr_code.filename}")
+
+@app.get("/api/objects/{object_id}/sticker")
+def get_sticker(object_id: int, db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    sticker_path = f"uploads/qrcodes/sticker_{obj.object_number}.png"
+    if not os.path.exists(sticker_path):
+        generate_sticker(obj.object_number, obj.designation)
+    return FileResponse(sticker_path)
+
+@app.get("/api/objects/{object_id}/sticker/print", response_class=HTMLResponse)
+def print_sticker(object_id: int, db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    sticker_path = f"uploads/qrcodes/sticker_{obj.object_number}.png"
+    if not os.path.exists(sticker_path):
+        generate_sticker(obj.object_number, obj.designation)
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Aufkleber {obj.object_number}</title>
+        <style>
+            body {{ margin: 0; padding: 20px; font-family: sans-serif; text-align: center; }}
+            .sticker {{ border: 2px dashed #ccc; padding: 20px; display: inline-block; }}
+            img {{ max-width: 100%; height: auto; }}
+            @media print {{
+                body {{ padding: 0; }}
+                .no-print {{ display: none; }}
+                .sticker {{ border: none; }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="no-print" style="margin-bottom: 20px;">
+            <button onclick="window.print()">🖨️ Drucken</button>
+            <p>Empfohlene Aufkleber-Größe: 50 x 25 mm</p>
+        </div>
+        <div class="sticker">
+            <img src="/uploads/qrcodes/sticker_{obj.object_number}.png" alt="Aufkleber">
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+# --- Frontend ---
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -76,126 +552,3 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
-# --- API Endpoints: Mitglieder ---
-
-@app.get("/api/mitglieder", response_model=List[MitgliedResponse])
-def get_mitglieder(db: Session = Depends(get_db)):
-    return db.query(Mitglied).all()
-
-@app.post("/api/mitglieder", response_model=MitgliedResponse)
-def create_mitglied(mitglied: MitgliedCreate, db: Session = Depends(get_db)):
-    db_mitglied = Mitglied(**mitglied.model_dump())
-    db.add(db_mitglied)
-    db.commit()
-    db.refresh(db_mitglied)
-    return db_mitglied
-
-@app.get("/api/mitglieder/{mitglied_id}", response_model=MitgliedResponse)
-def get_mitglied(mitglied_id: int, db: Session = Depends(get_db)):
-    m = db.query(Mitglied).filter(Mitglied.id == mitglied_id).first()
-    if not m:
-        raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
-    return m
-
-@app.put("/api/mitglieder/{mitglied_id}", response_model=MitgliedResponse)
-def update_mitglied(mitglied_id: int, mitglied: MitgliedCreate, db: Session = Depends(get_db)):
-    m = db.query(Mitglied).filter(Mitglied.id == mitglied_id).first()
-    if not m:
-        raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
-    for key, value in mitglied.model_dump().items():
-        setattr(m, key, value)
-    db.commit()
-    db.refresh(m)
-    return m
-
-@app.delete("/api/mitglieder/{mitglied_id}")
-def delete_mitglied(mitglied_id: int, db: Session = Depends(get_db)):
-    m = db.query(Mitglied).filter(Mitglied.id == mitglied_id).first()
-    if not m:
-        raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
-    db.delete(m)
-    db.commit()
-    return {"ok": True}
-
-# --- API Endpoints: Fahrzeuge ---
-
-@app.get("/api/fahrzeuge", response_model=List[FahrzeugResponse])
-def get_fahrzeuge(db: Session = Depends(get_db)):
-    return db.query(Fahrzeug).all()
-
-@app.post("/api/fahrzeuge", response_model=FahrzeugResponse)
-def create_fahrzeug(fahrzeug: FahrzeugCreate, db: Session = Depends(get_db)):
-    db_fahrzeug = Fahrzeug(**fahrzeug.model_dump())
-    db.add(db_fahrzeug)
-    db.commit()
-    db.refresh(db_fahrzeug)
-    return db_fahrzeug
-
-@app.get("/api/fahrzeuge/{fahrzeug_id}", response_model=FahrzeugResponse)
-def get_fahrzeug(fahrzeug_id: int, db: Session = Depends(get_db)):
-    f = db.query(Fahrzeug).filter(Fahrzeug.id == fahrzeug_id).first()
-    if not f:
-        raise HTTPException(status_code=404, detail="Fahrzeug nicht gefunden")
-    return f
-
-@app.put("/api/fahrzeuge/{fahrzeug_id}", response_model=FahrzeugResponse)
-def update_fahrzeug(fahrzeug_id: int, fahrzeug: FahrzeugCreate, db: Session = Depends(get_db)):
-    f = db.query(Fahrzeug).filter(Fahrzeug.id == fahrzeug_id).first()
-    if not f:
-        raise HTTPException(status_code=404, detail="Fahrzeug nicht gefunden")
-    for key, value in fahrzeug.model_dump().items():
-        setattr(f, key, value)
-    db.commit()
-    db.refresh(f)
-    return f
-
-@app.delete("/api/fahrzeuge/{fahrzeug_id}")
-def delete_fahrzeug(fahrzeug_id: int, db: Session = Depends(get_db)):
-    f = db.query(Fahrzeug).filter(Fahrzeug.id == fahrzeug_id).first()
-    if not f:
-        raise HTTPException(status_code=404, detail="Fahrzeug nicht gefunden")
-    db.delete(f)
-    db.commit()
-    return {"ok": True}
-
-# --- API Endpoints: Einsätze ---
-
-@app.get("/api/einsaetze", response_model=List[EinsatzResponse])
-def get_einsaetze(db: Session = Depends(get_db)):
-    return db.query(Einsatz).order_by(Einsatz.alarmierung.desc()).all()
-
-@app.post("/api/einsaetze", response_model=EinsatzResponse)
-def create_einsatz(einsatz: EinsatzCreate, db: Session = Depends(get_db)):
-    db_einsatz = Einsatz(**einsatz.model_dump())
-    db.add(db_einsatz)
-    db.commit()
-    db.refresh(db_einsatz)
-    return db_einsatz
-
-@app.get("/api/einsaetze/{einsatz_id}", response_model=EinsatzResponse)
-def get_einsatz(einsatz_id: int, db: Session = Depends(get_db)):
-    e = db.query(Einsatz).filter(Einsatz.id == einsatz_id).first()
-    if not e:
-        raise HTTPException(status_code=404, detail="Einsatz nicht gefunden")
-    return e
-
-@app.put("/api/einsaetze/{einsatz_id}", response_model=EinsatzResponse)
-def update_einsatz(einsatz_id: int, einsatz: EinsatzCreate, db: Session = Depends(get_db)):
-    e = db.query(Einsatz).filter(Einsatz.id == einsatz_id).first()
-    if not e:
-        raise HTTPException(status_code=404, detail="Einsatz nicht gefunden")
-    for key, value in einsatz.model_dump().items():
-        setattr(e, key, value)
-    db.commit()
-    db.refresh(e)
-    return e
-
-@app.delete("/api/einsaetze/{einsatz_id}")
-def delete_einsatz(einsatz_id: int, db: Session = Depends(get_db)):
-    e = db.query(Einsatz).filter(Einsatz.id == einsatz_id).first()
-    if not e:
-        raise HTTPException(status_code=404, detail="Einsatz nicht gefunden")
-    db.delete(e)
-    db.commit()
-    return {"ok": True}

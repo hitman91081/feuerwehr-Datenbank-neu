@@ -1,344 +1,469 @@
-/* Grundlayout */
-* {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-}
-
+/* === Grundlayout === */
+* { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background-color: #f5f5f5;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f0f2f5;
     color: #333;
-    line-height: 1.6;
+    line-height: 1.5;
 }
 
-header {
-    background: linear-gradient(135deg, #c62828 0%, #b71c1c 100%);
+.hidden { display: none !important; }
+
+/* === Login === */
+#login-screen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #b71c1c 0%, #d32f2f 100%);
+}
+.login-box {
+    background: white;
+    padding: 2rem;
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    width: 90%;
+    max-width: 380px;
+}
+.login-box h1 {
+    text-align: center;
+    color: #b71c1c;
+    margin-bottom: 1.5rem;
+    font-size: 1.5rem;
+}
+.login-box label {
+    display: block;
+    margin: 0.8rem 0 0.3rem;
+    font-size: 0.9rem;
+    color: #555;
+    font-weight: 500;
+}
+.login-box input {
+    width: 100%;
+    padding: 0.7rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 1rem;
+}
+.login-box button {
+    width: 100%;
+    margin-top: 1.2rem;
+    padding: 0.8rem;
+    font-size: 1rem;
+}
+.login-hint {
+    text-align: center;
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: #888;
+}
+
+/* === App Header === */
+.app-header {
+    background: #b71c1c;
     color: white;
-    padding: 1rem;
+    padding: 0.8rem 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
-
-header h1 {
-    font-size: 1.5rem;
-    margin-bottom: 0.5rem;
-    text-align: center;
+.app-header h1 {
+    font-size: 1.2rem;
+    cursor: pointer;
 }
-
-/* Navigation */
-#main-nav {
+.header-actions {
     display: flex;
-    justify-content: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.8rem;
 }
-
-.nav-btn {
+.btn-icon {
     background: rgba(255,255,255,0.2);
     border: none;
     color: white;
-    padding: 0.6rem 1.2rem;
-    border-radius: 4px;
+    font-size: 1.3rem;
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
     cursor: pointer;
-    font-size: 1rem;
-    transition: all 0.2s;
 }
 
-.nav-btn:hover, .nav-btn.active {
+/* === Mobile Menu === */
+.mobile-menu {
     background: white;
-    color: #c62828;
+    border-bottom: 1px solid #ddd;
+    padding: 0.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.mobile-menu button {
+    background: #f5f5f5;
+    border: none;
+    padding: 0.6rem 1rem;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    flex: 1;
+    min-width: 120px;
+}
+.mobile-menu button:hover {
+    background: #e0e0e0;
 }
 
-/* Main Content */
+/* === Main Content === */
 main {
-    max-width: 1200px;
+    max-width: 1000px;
     margin: 0 auto;
     padding: 1rem;
 }
 
-.tab-content {
-    display: none;
-}
-
-.tab-content.active {
-    display: block;
-}
-
-.section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-}
-
-.section-header h2 {
-    color: #c62828;
-    font-size: 1.3rem;
-}
-
-/* Buttons */
+/* === Buttons === */
 .btn-primary {
-    background: #c62828;
+    background: #b71c1c;
     color: white;
     border: none;
-    padding: 0.6rem 1rem;
-    border-radius: 4px;
+    padding: 0.6rem 1.2rem;
+    border-radius: 6px;
     cursor: pointer;
     font-size: 0.95rem;
     transition: background 0.2s;
 }
-
-.btn-primary:hover {
-    background: #b71c1c;
-}
-
+.btn-primary:hover { background: #8e1616; }
 .btn-secondary {
-    background: #757575;
+    background: #616161;
     color: white;
     border: none;
-    padding: 0.6rem 1rem;
-    border-radius: 4px;
+    padding: 0.6rem 1.2rem;
+    border-radius: 6px;
     cursor: pointer;
     font-size: 0.95rem;
 }
-
-.btn-secondary:hover {
-    background: #616161;
-}
-
+.btn-secondary:hover { background: #424242; }
 .btn-small {
-    padding: 0.3rem 0.6rem;
+    padding: 0.3rem 0.7rem;
     font-size: 0.85rem;
-    margin: 0 0.1rem;
+    margin: 0.1rem;
 }
 
-.btn-edit {
-    background: #1976d2;
+/* === Dashboard === */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+.dash-card {
+    background: white;
+    border-radius: 10px;
+    padding: 1.5rem;
+    text-align: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.dash-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+}
+.dash-icon {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+}
+.dash-card h3 {
+    color: #333;
+    font-size: 1.1rem;
+    margin-bottom: 0.3rem;
+}
+.dash-card p {
+    color: #777;
+    font-size: 0.9rem;
 }
 
-.btn-edit:hover {
-    background: #1565c0;
+/* === Alerts === */
+.alerts {
+    margin-top: 1.5rem;
+}
+.alert {
+    background: #fff3e0;
+    border-left: 4px solid #ef6c00;
+    padding: 0.8rem 1rem;
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+}
+.alert-danger {
+    background: #ffebee;
+    border-left-color: #c62828;
 }
 
-.btn-delete {
-    background: #d32f2f;
-}
-
-.btn-delete:hover {
-    background: #c62828;
-}
-
-/* Search */
-.search-box {
+/* === Search === */
+.search-header {
+    display: flex;
+    gap: 0.5rem;
     margin-bottom: 1rem;
 }
-
-.search-box input {
-    width: 100%;
-    max-width: 400px;
-    padding: 0.6rem;
+.search-header input {
+    flex: 1;
+    padding: 0.7rem;
     border: 1px solid #ddd;
-    border-radius: 4px;
+    border-radius: 6px;
     font-size: 1rem;
 }
 
-/* Tables */
-.table-container {
+/* === Cards === */
+.card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+.card {
     background: white;
     border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    overflow-x: auto;
+    padding: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    display: flex;
+    gap: 1rem;
+    cursor: pointer;
+    transition: box-shadow 0.2s;
+}
+.card:hover {
+    box-shadow: 0 3px 8px rgba(0,0,0,0.12);
+}
+.card-image {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 6px;
+    background: #eee;
+    flex-shrink: 0;
+}
+.card-body {
+    flex: 1;
+}
+.card-body h4 {
+    color: #b71c1c;
+    margin-bottom: 0.2rem;
+}
+.card-meta {
+    font-size: 0.85rem;
+    color: #666;
 }
 
-table {
+/* === Wiki Detail (Wikipedia Style) === */
+.wiki-container {
+    background: white;
+    border-radius: 8px;
+    padding: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.wiki-infobox {
+    float: right;
+    width: 300px;
+    margin: 0 0 1rem 1rem;
+    background: #f8f9fa;
+    border: 1px solid #eaecf0;
+    border-radius: 8px;
+    padding: 1rem;
+}
+.wiki-infobox img {
     width: 100%;
-    border-collapse: collapse;
-    font-size: 0.95rem;
+    border-radius: 4px;
+    margin-bottom: 0.8rem;
+}
+.wiki-infobox h3 {
+    text-align: center;
+    font-size: 1.1rem;
+    margin-bottom: 0.8rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #ddd;
+}
+.wiki-infobox table {
+    width: 100%;
+    font-size: 0.9rem;
+}
+.wiki-infobox td {
+    padding: 0.3rem 0;
+    vertical-align: top;
+}
+.wiki-infobox td:first-child {
+    color: #555;
+    font-weight: 500;
+    width: 40%;
 }
 
-th, td {
-    padding: 0.75rem;
-    text-align: left;
+.wiki-content h2 {
+    color: #b71c1c;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 0.3rem;
+    margin: 1.5rem 0 0.8rem;
+    font-size: 1.3rem;
+}
+.wiki-content p {
+    margin-bottom: 0.8rem;
+}
+
+.wiki-actions {
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
     border-bottom: 1px solid #eee;
 }
 
-th {
-    background: #fafafa;
-    font-weight: 600;
-    color: #555;
-}
-
-tr:hover {
-    background: #f9f9f9;
-}
-
-/* Status badges */
-.status-aktiv, .status-einsatzbereit, .status-offen {
-    background: #e8f5e9;
-    color: #2e7d32;
-    padding: 0.2rem 0.5rem;
-    border-radius: 12px;
-    font-size: 0.85rem;
-    font-weight: 500;
-}
-
-.status-inaktiv, .status-außer-dienst, .status-abgeschlossen {
-    background: #ffebee;
-    color: #c62828;
-    padding: 0.2rem 0.5rem;
-    border-radius: 12px;
-    font-size: 0.85rem;
-    font-weight: 500;
-}
-
-.status-werkstatt {
-    background: #fff3e0;
-    color: #ef6c00;
-    padding: 0.2rem 0.5rem;
-    border-radius: 12px;
-    font-size: 0.85rem;
-    font-weight: 500;
-}
-
-/* Modal */
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
+/* === QR Reader === */
+#qr-reader {
     width: 100%;
-    height: 100%;
-    background: rgba(0,0,0,0.5);
-    overflow-y: auto;
-}
-
-.modal-content {
-    background: white;
-    margin: 2rem auto;
-    padding: 1.5rem;
-    border-radius: 8px;
     max-width: 500px;
-    width: 90%;
-    position: relative;
+    margin: 1rem auto;
 }
 
-.close {
-    position: absolute;
-    right: 1rem;
-    top: 0.8rem;
-    font-size: 1.5rem;
-    cursor: pointer;
-    color: #999;
+/* === Forms === */
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
 }
-
-.close:hover {
-    color: #333;
-}
-
-/* Form */
-#modal-form label {
+form label {
     display: block;
     margin: 0.8rem 0 0.3rem;
+    font-size: 0.9rem;
     font-weight: 500;
-    color: #555;
+    color: #444;
 }
-
-#modal-form input,
-#modal-form select,
-#modal-form textarea {
+form input, form select, form textarea {
     width: 100%;
     padding: 0.6rem;
-    border: 1px solid #ddd;
-    border-radius: 4px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
     font-size: 1rem;
     font-family: inherit;
 }
-
-#modal-form textarea {
-    resize: vertical;
-    min-height: 80px;
-}
-
+form textarea { resize: vertical; }
 .form-actions {
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
     margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #eee;
 }
 
-/* Footer */
-footer {
-    text-align: center;
-    padding: 1rem;
-    color: #999;
-    font-size: 0.9rem;
+/* === Admin === */
+.admin-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin: 1rem 0;
+    border-bottom: 2px solid #eee;
+}
+.admin-tab {
+    background: none;
+    border: none;
+    padding: 0.6rem 1rem;
+    cursor: pointer;
+    font-size: 1rem;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+}
+.admin-tab.active {
+    border-bottom-color: #b71c1c;
+    color: #b71c1c;
+    font-weight: 600;
+}
+.table-container {
+    background: white;
+    border-radius: 8px;
+    overflow-x: auto;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    margin-top: 1rem;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+}
+th, td {
+    padding: 0.7rem;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+}
+th {
+    background: #fafafa;
+    font-weight: 600;
+    color: #555;
+}
+tr:hover { background: #f9f9f9; }
+
+/* === Status Badges === */
+.badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+.badge-in_benutzung { background: #e8f5e9; color: #2e7d32; }
+.badge-in_reparatur { background: #fff3e0; color: #ef6c00; }
+.badge-ausgemustert { background: #ffebee; color: #c62828; }
+.badge-reserve { background: #e3f2fd; color: #1565c0; }
+.badge-zur_reinigung { background: #f3e5f5; color: #6a1b9a; }
+
+/* === Image Gallery === */
+.gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+.gallery img {
+    width: 100%;
+    height: 100px;
+    object-fit: cover;
+    border-radius: 4px;
+    background: #eee;
 }
 
-/* Mobile Anpassungen */
+/* === Document List === */
+.doc-list a {
+    display: block;
+    padding: 0.4rem 0;
+    color: #1565c0;
+    text-decoration: none;
+}
+.doc-list a:hover { text-decoration: underline; }
+
+/* === Mobile Anpassungen === */
 @media (max-width: 768px) {
-    header h1 {
-        font-size: 1.2rem;
+    .wiki-infobox {
+        float: none;
+        width: 100%;
+        margin: 0 0 1rem 0;
     }
-
-    .nav-btn {
-        padding: 0.5rem 0.8rem;
-        font-size: 0.9rem;
+    .dashboard-grid {
+        grid-template-columns: 1fr;
     }
-
-    .section-header {
+    .form-grid {
+        grid-template-columns: 1fr;
+    }
+    .card {
         flex-direction: column;
-        align-items: flex-start;
     }
-
-    th, td {
-        padding: 0.5rem;
-        font-size: 0.9rem;
+    .card-image {
+        width: 100%;
+        height: 160px;
     }
+}
 
-    /* Karten-Ansicht für mobile Tabellen */
-    .table-container {
-        background: transparent;
-        box-shadow: none;
+/* === Print === */
+@media print {
+    .app-header, .mobile-menu, .wiki-actions, .form-actions {
+        display: none !important;
     }
-
-    table, thead, tbody, th, td, tr {
-        display: block;
-    }
-
-    thead {
-        display: none;
-    }
-
-    tbody tr {
-        background: white;
-        margin-bottom: 1rem;
-        border-radius: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        padding: 1rem;
-    }
-
-    td {
-        border: none;
-        position: relative;
-        padding-left: 40%;
-        padding-top: 0.8rem;
-        padding-bottom: 0.8rem;
-    }
-
-    td:before {
-        content: attr(data-label);
-        position: absolute;
-        left: 0.75rem;
-        font-weight: 600;
-        color: #555;
-    }
-
-    td:last-child {
-        padding-left: 0.75rem;
-        margin-top: 0.5rem;
-        border-top: 1px solid #eee;
+    .wiki-infobox {
+        float: right;
+        width: 40%;
+        border: 1px solid #ccc;
     }
 }
