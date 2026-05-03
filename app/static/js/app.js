@@ -94,15 +94,19 @@ function toggleMenu() {
 async function loadMasterData() {
     masterData.types = await api('/api/object-types');
     masterData.manufacturers = await api('/api/manufacturers');
-    masterData.locations = await api('/api/locations');
+    // Wichtig: /api/locations/all gibt ALLE Standorte als flache Liste zurück
+    const allLocations = await api('/api/locations/all');
+    masterData.locations = buildLocationTree(allLocations);
+    masterData.locationsFlat = allLocations;
+
     fillSelect('obj-type', masterData.types, 'name');
     fillSelect('obj-manufacturer', masterData.manufacturers, 'name');
-    fillSelect('obj-location', flattenLocations(masterData.locations), 'name');
-    fillSelect('new-location-parent', flattenLocations(masterData.locations), 'name');
+    fillSelect('obj-location', allLocations.map(l => ({ id: l.id, name: getLocationPath(allLocations, l.id) })), 'name');
+    fillSelect('new-location-parent', allLocations.map(l => ({ id: l.id, name: getLocationPath(allLocations, l.id) })), 'name');
 
     // Filter-Dropdowns füllen
     fillFilterSelect('filter-type', masterData.types, 'name');
-    fillFilterSelect('filter-location', flattenLocations(masterData.locations), 'name');
+    fillFilterSelect('filter-location', allLocations.map(l => ({ id: l.id, name: getLocationPath(allLocations, l.id) })), 'name');
     fillFilterSelect('filter-manufacturer', masterData.manufacturers, 'name');
 
     // Typ-Änderung: Zeige "Als Standort anlegen" nur bei Fahrzeugen
@@ -119,6 +123,37 @@ async function loadMasterData() {
             }
         };
     }
+}
+
+function buildLocationTree(locations) {
+    // Baut Baumstruktur aus flacher Liste
+    const locMap = {};
+    locations.forEach(l => {
+        locMap[l.id] = { ...l, children: [] };
+    });
+    const roots = [];
+    locations.forEach(l => {
+        if (l.parent_id && locMap[l.parent_id]) {
+            locMap[l.parent_id].children.push(locMap[l.id]);
+        } else {
+            roots.push(locMap[l.id]);
+        }
+    });
+    return roots;
+}
+
+function getLocationPath(allLocations, locationId) {
+    if (!locationId || !allLocations) return '';
+    const locMap = {};
+    allLocations.forEach(l => locMap[l.id] = l);
+    
+    const parts = [];
+    let current = locMap[locationId];
+    while (current) {
+        parts.unshift(current.name);
+        current = current.parent_id ? locMap[current.parent_id] : null;
+    }
+    return parts.join(' > ');
 }
 
 function fillFilterSelect(id, items, labelKey) {
@@ -198,8 +233,15 @@ async function saveNewLocation() {
     if (!name) return alert('Bitte Standortnamen eingeben');
     try {
         const loc = await api('/api/locations', { method: 'POST', body: JSON.stringify({ name, location_type: type, parent_id: parentId ? parseInt(parentId) : null }) });
-        masterData.locations = await api('/api/locations');
-        fillSelect('obj-location', flattenLocations(masterData.locations), 'name');
+        // Alle Standorte neu laden
+        const allLocations = await api('/api/locations/all');
+        masterData.locationsFlat = allLocations;
+        masterData.locations = buildLocationTree(allLocations);
+        
+        // Dropdowns aktualisieren
+        fillSelect('obj-location', allLocations.map(l => ({ id: l.id, name: getLocationPath(allLocations, l.id) })), 'name');
+        fillSelect('new-location-parent', allLocations.map(l => ({ id: l.id, name: getLocationPath(allLocations, l.id) })), 'name');
+        
         document.getElementById('obj-location').value = loc.id;
         document.getElementById('new-location').value = '';
         document.getElementById('new-location-type').value = 'Standort';
@@ -314,20 +356,13 @@ async function openObject(id) {
     } catch (e) { alert('Fehler: ' + e.message); }
 }
 
-function getLocationPath(locationId) {
-    if (!locationId || !masterData.locations) return '';
-    const flat = flattenLocations(masterData.locations);
-    const loc = flat.find(l => l.id == locationId);
-    return loc ? loc.name : '';
-}
-
 function renderObjectDetail(obj) {
     const isStandard = currentUser.role === 'standard';
     const isFull = !isStandard;
     const isAdmin = currentUser.role === 'admin';
 
-    // Infobox
-    const locationPath = obj.location ? getLocationPath(obj.location.id) : '';
+    // Infobox - Standortpfad mit flacher Liste auflösen
+    const locationPath = obj.location ? getLocationPath(masterData.locationsFlat || [], obj.location.id) : '';
     let infoboxHtml = `
         <h3>${escapeHtml(obj.designation)}</h3>
         ${obj.title_image ? `<img src="/uploads/images/${obj.title_image}" alt="Titelbild">` : ''}
@@ -752,49 +787,61 @@ async function loadMasterDataLists() {
     // Hersteller
     const manus = await api('/api/manufacturers');
     let manuHtml = `
-        <div style="margin-bottom:1rem;">
-            <input type="text" id="new-manufacturer-admin" placeholder="Neuer Hersteller..." style="width:250px;">
-            <button class="btn-primary btn-small" onclick="addManufacturerAdmin()">+ Hinzufügen</button>
+        <div style="margin-bottom:1rem; padding:1rem; background:#f5f5f5; border-radius:8px;">
+            <h4>Hersteller anlegen</h4>
+            <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="new-manufacturer-admin" placeholder="Neuer Hersteller..." style="flex:1;">
+                <button class="btn-primary btn-small" onclick="addManufacturerAdmin()">+ Hinzufügen</button>
+            </div>
+        </div>
+        <div style="margin-top:0.5rem;">
+            ${manus.map(m => `<span class="badge badge-reserve" style="margin:0.2rem;display:inline-block">${escapeHtml(m.name)}</span>`).join('') || '<p>Keine Hersteller vorhanden</p>'}
         </div>
     `;
-    manuHtml += manus.map(m => `
-        <span class="badge badge-reserve" style="margin:0.2rem;display:inline-block">${escapeHtml(m.name)}</span>
-    `).join('') || '<p>Keine Hersteller</p>';
     document.getElementById('manufacturers-list').innerHTML = manuHtml;
 
     // Standorte
-    const locs = await api('/api/locations');
-    // Lade auch alle Objekte für die Baumstruktur
+    const treeLocs = await api('/api/locations'); // Baumstruktur (Root + Children)
+    const flatLocs = await api('/api/locations/all'); // Flache Liste
     const allObjects = await api('/api/objects');
     
+    // HTML aufbauen
     let locHtml = `
         <div style="margin-bottom:1rem; background:#f5f5f5; padding:1rem; border-radius:8px;">
-            <h4>Neuen Standort anlegen</h4>
-            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <input type="text" id="new-location-admin" placeholder="Standortname..." style="flex:2; min-width:150px;">
-                <input type="text" id="new-location-type-admin" placeholder="Typ (z.B. Fahrzeug, Raum)..." style="flex:1; min-width:120px;">
-                <select id="new-location-parent-admin" style="flex:1; min-width:150px;">
-                    <option value="">-- Kein Übergeordneter --</option>
-                </select>
-                <button class="btn-primary btn-small" onclick="addLocationAdmin()">+ Hinzufügen</button>
+            <h4>Standort anlegen</h4>
+            <div style="display:grid; grid-template-columns: 2fr 1fr 1fr auto; gap:0.5rem; align-items:end;">
+                <div>
+                    <label style="font-size:0.85rem; color:#666;">Name</label>
+                    <input type="text" id="new-location-admin" placeholder="z.B. TLF 3000">
+                </div>
+                <div>
+                    <label style="font-size:0.85rem; color:#666;">Typ</label>
+                    <input type="text" id="new-location-type-admin" placeholder="z.B. Fahrzeug">
+                </div>
+                <div>
+                    <label style="font-size:0.85rem; color:#666;">Übergeordnet</label>
+                    <select id="new-location-parent-admin"><option value="">-- Keiner --</option></select>
+                </div>
+                <button class="btn-primary btn-small" onclick="addLocationAdmin()" style="margin-bottom:0.3rem;">+</button>
             </div>
         </div>
+        <h4>Standortstruktur</h4>
     `;
     
-    // Parent-Dropdown füllen
-    const flatLocs = flattenLocations(locs);
+    locHtml += renderLocationTreeWithObjects(treeLocs, allObjects);
+    document.getElementById('locations-list').innerHTML = locHtml;
+    
+    // Jetzt das Dropdown füllen (Element existiert jetzt im DOM!)
     const parentSel = document.getElementById('new-location-parent-admin');
-    if (parentSel) {
+    if (parentSel && flatLocs) {
         flatLocs.forEach(l => {
+            const path = getLocationPath(flatLocs, l.id);
             const opt = document.createElement('option');
             opt.value = l.id;
-            opt.textContent = l.name;
+            opt.textContent = path;
             parentSel.appendChild(opt);
         });
     }
-    
-    locHtml += renderLocationTreeWithObjects(locs, allObjects);
-    document.getElementById('locations-list').innerHTML = locHtml;
 }
 
 async function addManufacturerAdmin() {
@@ -804,7 +851,7 @@ async function addManufacturerAdmin() {
         await api('/api/manufacturers', { method: 'POST', body: JSON.stringify({ name }) });
         document.getElementById('new-manufacturer-admin').value = '';
         loadMasterDataLists();
-        loadMasterData(); // Auch Haupt-Dropdowns aktualisieren
+        loadMasterData();
     } catch (e) { alert('Fehler: ' + e.message); }
 }
 
@@ -819,36 +866,47 @@ async function addLocationAdmin() {
         document.getElementById('new-location-type-admin').value = '';
         document.getElementById('new-location-parent-admin').value = '';
         loadMasterDataLists();
-        loadMasterData(); // Auch Haupt-Dropdowns aktualisieren
+        loadMasterData();
     } catch (e) { alert('Fehler: ' + e.message); }
 }
 
 function renderLocationTreeWithObjects(locs, allObjects, level = 0) {
     if (!locs || !locs.length) return '';
-    let html = '<ul class="location-tree" style="margin-left:' + (level * 25) + 'px; list-style:none; padding-left:0;">';
+    const indent = level * 20;
+    const colors = ['#e3f2fd', '#f5f5f5', '#fafafa', '#fff8e1', '#f3e5f5'];
+    const borderColors = ['#1976d2', '#388e3c', '#f57c00', '#7b1fa2', '#5d4037'];
+    
+    let html = '<ul style="list-style:none; padding-left:0; margin:0;">';
     locs.forEach(l => {
-        // Finde Objekte an diesem Standort
-        const locObjects = allObjects.filter(o => o.location_id === l.id || o.location_name === l.name);
-        let objCount = locObjects.length;
+        const locObjects = allObjects.filter(o => o.location_id === l.id);
+        const objCount = locObjects.length;
+        const hasChildren = l.children && l.children.length > 0;
         
-        html += `<li style="margin:0.4rem 0; padding:0.5rem; background:${level === 0 ? '#e3f2fd' : level === 1 ? '#f5f5f5' : '#fafafa'}; border-radius:6px; border-left:3px solid #1976d2;">`;
-        html += `<strong>${escapeHtml(l.name)}</strong> <span style="color:#666; font-size:0.9rem;">(${escapeHtml(l.location_type)})</span>`;
+        html += `<li style="margin:0.3rem 0; padding-left:${indent}px;">`;
+        html += `<div style="padding:0.5rem; background:${colors[level % colors.length]}; border-radius:6px; border-left:3px solid ${borderColors[level % borderColors.length]};">`;
+        
+        // Header mit Icon und Name
+        html += `<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.3rem;">`;
+        html += `<div>${hasChildren ? '📁' : '📂'} <strong>${escapeHtml(l.name)}</strong> <span style="color:#666; font-size:0.85rem;">(${escapeHtml(l.location_type)})</span></div>`;
         if (objCount > 0) {
-            html += ` <span class="badge badge-reserve" style="font-size:0.8rem;">${objCount} Objekt${objCount > 1 ? 'e' : ''}</span>`;
+            html += `<span class="badge badge-reserve" style="font-size:0.75rem;">${objCount} Objekt${objCount > 1 ? 'e' : ''}</span>`;
         }
+        html += `</div>`;
         
-        // Untergeordnete Standorte
-        if (l.children && l.children.length) {
-            html += renderLocationTreeWithObjects(l.children, allObjects, level + 1);
-        }
-        
-        // Objekte direkt an diesem Standort anzeigen
-        if (locObjects.length > 0 && level >= 0) {
-            html += '<ul style="list-style:none; padding-left:15px; margin-top:0.3rem;">';
+        // Objekte an diesem Standort
+        if (locObjects.length > 0) {
+            html += '<div style="margin-top:0.4rem; padding-left:1rem; border-left:2px dashed #ccc;">';
             locObjects.forEach(o => {
-                html += `<li style="font-size:0.9rem; padding:0.2rem 0;">📦 <a href="#" onclick="event.preventDefault(); openObject(${o.id});" style="color:#1565c0;">${escapeHtml(o.designation)}</a> <small>(${o.object_number})</small></li>`;
+                html += `<div style="font-size:0.9rem; padding:0.15rem 0;">📦 <a href="#" onclick="event.preventDefault(); openObject(${o.id});" style="color:#1565c0; text-decoration:none;">${escapeHtml(o.designation)}</a> <small style="color:#999;">${o.object_number}</small></div>`;
             });
-            html += '</ul>';
+            html += '</div>';
+        }
+        
+        html += '</div>';
+        
+        // Rekursiv Kinder rendern
+        if (hasChildren) {
+            html += renderLocationTreeWithObjects(l.children, allObjects, level + 1);
         }
         
         html += '</li>';

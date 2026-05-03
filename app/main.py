@@ -311,7 +311,16 @@ def create_manufacturer(data: ManufacturerCreate, db: Session = Depends(get_db),
 
 @app.get("/api/locations", response_model=List[LocationResponse])
 def list_locations(db: Session = Depends(get_db), user: User = Depends(require_any_user)):
-    return db.query(Location).filter(Location.parent_id == None).all()
+    # Gibt alle Standorte zurück - Baumstruktur wird im Frontend aufgebaut
+    all_locs = db.query(Location).order_by(Location.name).all()
+    # Baumstruktur aufbauen: Nur Root-Elemente zurückgeben, Kinder sind über Relationship verfügbar
+    root_locs = [loc for loc in all_locs if loc.parent_id is None]
+    return root_locs
+
+@app.get("/api/locations/all", response_model=List[LocationResponse])
+def list_all_locations_flat(db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    """Gibt ALLE Standorte als flache Liste zurück (für Dropdowns)"""
+    return db.query(Location).order_by(Location.name).all()
 
 @app.post("/api/locations", response_model=LocationResponse)
 def create_location(data: LocationCreate, db: Session = Depends(get_db), user: User = Depends(require_erweitert)):
