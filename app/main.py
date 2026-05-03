@@ -21,7 +21,7 @@ from app.schemas import (
     LocationCreate, LocationResponse, InventoryObjectCreate, InventoryObjectUpdate,
     InventoryObjectPublicResponse, InventoryObjectFullResponse,
     MaintenanceCreate, MaintenanceResponse, RepairCreate, RepairResponse,
-    DocumentResponse, SearchResult
+    DocumentResponse, SearchResult, QRCodeResponse
 )
 from app.auth import (
     verify_password, create_access_token, get_current_user,
@@ -245,6 +245,36 @@ def create_location(data: LocationCreate, db: Session = Depends(get_db), user: U
     db.refresh(loc)
     return loc
 
+# --- Standort-Objekte (rekursiv) ---
+
+def get_all_sub_location_ids(db: Session, location_id: int) -> List[int]:
+    """Gibt alle Location-IDs inkl. Unterlocations zurück"""
+    ids = [location_id]
+    children = db.query(Location).filter(Location.parent_id == location_id).all()
+    for child in children:
+        ids.extend(get_all_sub_location_ids(db, child.id))
+    return ids
+
+@app.get("/api/locations/{location_id}/objects", response_model=List[SearchResult])
+def get_objects_by_location(location_id: int, db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    loc = db.query(Location).filter(Location.id == location_id).first()
+    if not loc:
+        raise HTTPException(status_code=404, detail="Standort nicht gefunden")
+    all_loc_ids = get_all_sub_location_ids(db, location_id)
+    objects = db.query(InventoryObject).filter(InventoryObject.location_id.in_(all_loc_ids)).order_by(InventoryObject.designation).all()
+    result = []
+    for obj in objects:
+        result.append(SearchResult(
+            id=obj.id,
+            designation=obj.designation,
+            object_number=obj.object_number,
+            object_type=obj.object_type.name if obj.object_type else None,
+            status=obj.status.value if obj.status else None,
+            title_image=obj.title_image,
+            location_name=obj.location.name if obj.location else None
+        ))
+    return result
+
 # --- Objekte ---
 
 @app.get("/api/objects/search", response_model=List[SearchResult])
@@ -349,7 +379,7 @@ def get_object(object_id: int, db: Session = Depends(get_db), user: User = Depen
             title_image=obj.title_image,
             info_text=obj.info_text,
             usage_hints=obj.usage_hints,
-            documents=[DocumentResponse.from_orm(d) for d in public_docs],
+            documents=[DocumentResponse.model_validate(d) for d in public_docs],
             qr_code=QRCodeResponse(id=obj.qr_code.id, filename=obj.qr_code.filename, created_at=obj.qr_code.created_at) if obj.qr_code else None
         )
     

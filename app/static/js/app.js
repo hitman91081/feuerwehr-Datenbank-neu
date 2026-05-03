@@ -98,6 +98,22 @@ async function loadMasterData() {
     fillSelect('obj-type', masterData.types, 'name');
     fillSelect('obj-manufacturer', masterData.manufacturers, 'name');
     fillSelect('obj-location', flattenLocations(masterData.locations), 'name');
+    fillSelect('new-location-parent', flattenLocations(masterData.locations), 'name');
+
+    // Typ-Änderung: Zeige "Als Standort anlegen" nur bei Fahrzeugen
+    const typeSel = document.getElementById('obj-type');
+    if (typeSel) {
+        typeSel.onchange = () => {
+            const selected = masterData.types.find(t => t.id == typeSel.value);
+            const box = document.getElementById('vehicle-location-box');
+            if (selected && selected.name === 'Fahrzeug') {
+                box.classList.remove('hidden');
+            } else {
+                box.classList.add('hidden');
+                document.getElementById('obj-vehicle-as-location').checked = false;
+            }
+        };
+    }
 }
 
 function fillSelect(id, items, labelKey) {
@@ -123,6 +139,51 @@ function flattenLocations(locations, prefix = '') {
         }
     });
     return flat;
+}
+
+// === Inline Add Functions ===
+function showAddManufacturer() {
+    document.getElementById('add-manufacturer-box').classList.toggle('hidden');
+    if (!document.getElementById('add-manufacturer-box').classList.contains('hidden')) {
+        document.getElementById('new-manufacturer').focus();
+    }
+}
+
+async function saveNewManufacturer() {
+    const name = document.getElementById('new-manufacturer').value.trim();
+    if (!name) return alert('Bitte Herstellername eingeben');
+    try {
+        const m = await api('/api/manufacturers', { method: 'POST', body: JSON.stringify({ name }) });
+        masterData.manufacturers.push(m);
+        fillSelect('obj-manufacturer', masterData.manufacturers, 'name');
+        document.getElementById('obj-manufacturer').value = m.id;
+        document.getElementById('new-manufacturer').value = '';
+        document.getElementById('add-manufacturer-box').classList.add('hidden');
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+function showAddLocation() {
+    document.getElementById('add-location-box').classList.toggle('hidden');
+    fillSelect('new-location-parent', flattenLocations(masterData.locations), 'name');
+    if (!document.getElementById('add-location-box').classList.contains('hidden')) {
+        document.getElementById('new-location').focus();
+    }
+}
+
+async function saveNewLocation() {
+    const name = document.getElementById('new-location').value.trim();
+    const type = document.getElementById('new-location-type').value.trim() || 'Standort';
+    const parentId = document.getElementById('new-location-parent').value || null;
+    if (!name) return alert('Bitte Standortnamen eingeben');
+    try {
+        const loc = await api('/api/locations', { method: 'POST', body: JSON.stringify({ name, location_type: type, parent_id: parentId ? parseInt(parentId) : null }) });
+        masterData.locations = await api('/api/locations');
+        fillSelect('obj-location', flattenLocations(masterData.locations), 'name');
+        document.getElementById('obj-location').value = loc.id;
+        document.getElementById('new-location').value = '';
+        document.getElementById('new-location-type').value = 'Standort';
+        document.getElementById('add-location-box').classList.add('hidden');
+    } catch (e) { alert('Fehler: ' + e.message); }
 }
 
 // === Dashboard ===
@@ -222,7 +283,7 @@ function renderObjectDetail(obj) {
             <tr><td>ID</td><td><strong>${obj.object_number}</strong></td></tr>
             <tr><td>Typ</td><td>${obj.object_type ? obj.object_type.name : '-'}</td></tr>
             <tr><td>Hersteller</td><td>${obj.manufacturer ? obj.manufacturer.name : '-'}</td></tr>
-            <tr><td>Unterbringung</td><td>${obj.location ? escapeHtml(obj.location.name) : '-'}</td></tr>
+            <tr><td>Unterbringung</td><td>${obj.location ? `<a href="#" onclick="event.preventDefault(); showObjectsByLocation(${obj.location.id}, '${escapeHtml(obj.location.name)}')">${escapeHtml(obj.location.name)}</a>` : '-'}</td></tr>
             ${isFull ? `<tr><td>Seriennummer</td><td>${escapeHtml(obj.serial_number || '-')}</td></tr>` : ''}
             ${isFull ? `<tr><td>Anschaffung</td><td>${obj.acquisition_date || '-'}</td></tr>` : ''}
             <tr><td>Status</td><td><span class="badge badge-${obj.status}">${formatStatus(obj.status)}</span></td></tr>
@@ -395,6 +456,19 @@ async function saveObject(e) {
             }
         }
 
+        // Fahrzeug auch als Standort anlegen?
+        const vehicleAsLoc = document.getElementById('obj-vehicle-as-location').checked;
+        const selectedType = masterData.types.find(t => t.id == data.object_type_id);
+        if (!id && vehicleAsLoc && selectedType && selectedType.name === 'Fahrzeug') {
+            try {
+                await api('/api/locations', {
+                    method: 'POST',
+                    body: JSON.stringify({ name: obj.designation, location_type: 'Fahrzeug', parent_id: data.location_id || null })
+                });
+                masterData.locations = await api('/api/locations');
+            } catch (e) { console.warn('Standort konnte nicht angelegt werden:', e); }
+        }
+
         alert('Gespeichert!');
         // Formular zurücksetzen
         document.getElementById('object-form').reset();
@@ -402,10 +476,41 @@ async function saveObject(e) {
         document.getElementById('new-manufacturer').value = '';
         document.getElementById('new-location').value = '';
         document.getElementById('new-location-type').value = '';
+        document.getElementById('vehicle-location-box').classList.add('hidden');
+        document.getElementById('obj-vehicle-as-location').checked = false;
+        document.getElementById('add-manufacturer-box').classList.add('hidden');
+        document.getElementById('add-location-box').classList.add('hidden');
 
         showView('search');
         document.getElementById('search-input').value = obj.object_number;
         doSearch();
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+async function showObjectsByLocation(locationId, locationName) {
+    try {
+        const objects = await api('/api/locations/' + locationId + '/objects');
+        document.getElementById('location-objects-title').textContent = 'Objekte: ' + locationName;
+        const container = document.getElementById('location-objects-list');
+        if (!objects.length) {
+            container.innerHTML = '<p>Keine Objekte an diesem Standort.</p>';
+        } else {
+            container.innerHTML = objects.map(r => `
+                <div class="card" onclick="openObject(${r.id})">
+                    <img class="card-image" src="${r.title_image ? '/uploads/images/' + r.title_image : ''}" alt="" onerror="this.style.display='none'">
+                    <div class="card-body">
+                        <h4>${escapeHtml(r.designation)}</h4>
+                        <div class="card-meta">
+                            <span class="badge badge-${r.status}">${formatStatus(r.status)}</span>
+                            <strong>${r.object_number}</strong>
+                            ${r.object_type ? '· ' + r.object_type : ''}
+                            ${r.location_name ? '· ' + escapeHtml(r.location_name) : ''}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+        showView('location-objects');
     } catch (e) { alert('Fehler: ' + e.message); }
 }
 
@@ -427,6 +532,12 @@ async function editObject(id) {
         document.getElementById('new-manufacturer').value = '';
         document.getElementById('new-location').value = '';
         document.getElementById('new-location-type').value = '';
+        document.getElementById('add-manufacturer-box').classList.add('hidden');
+        document.getElementById('add-location-box').classList.add('hidden');
+        document.getElementById('obj-vehicle-as-location').checked = false;
+        // Trigger type change to show/hide vehicle-location-box
+        const typeSel = document.getElementById('obj-type');
+        if (typeSel && typeSel.onchange) typeSel.onchange();
 
         if (obj.maintenances && obj.maintenances[0]) {
             document.getElementById('obj-maint-days').value = obj.maintenances[0].interval_days;

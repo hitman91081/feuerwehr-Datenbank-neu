@@ -89,6 +89,12 @@
                 </div>
             </div>
 
+            <!-- Objects by Location -->
+            <div id="view-location-objects" class="view hidden">
+                <h2 id="location-objects-title">Objekte am Standort</h2>
+                <div id="location-objects-list" class="card-list"></div>
+            </div>
+
             <!-- Object Form -->
             <div id="view-edit-object" class="view hidden">
                 <h2 id="form-title">Objekt anlegen</h2>
@@ -104,19 +110,26 @@
                             <select id="obj-type" required></select>
                         </div>
                         <div>
-                            <label>Hersteller</label>
+                            <label>Hersteller <button type="button" class="btn-small" onclick="showAddManufacturer()">+</button></label>
                             <select id="obj-manufacturer"><option value="">-- Auswählen --</option></select>
-                            <input type="text" id="new-manufacturer" placeholder="Neuer Hersteller...">
+                            <div id="add-manufacturer-box" class="hidden inline-add-box">
+                                <input type="text" id="new-manufacturer" placeholder="Neuer Hersteller...">
+                                <button type="button" class="btn-small" onclick="saveNewManufacturer()">Hinzufügen</button>
+                            </div>
                         </div>
                         <div>
                             <label>Seriennummer</label>
                             <input type="text" id="obj-serial">
                         </div>
                         <div>
-                            <label>Unterbringung</label>
+                            <label>Unterbringung <button type="button" class="btn-small" onclick="showAddLocation()">+</button></label>
                             <select id="obj-location"><option value="">-- Auswählen --</option></select>
-                            <input type="text" id="new-location" placeholder="Neuer Standort...">
-                            <input type="text" id="new-location-type" placeholder="Standort-Typ (z.B. Fahrzeug, Raum)...">
+                            <div id="add-location-box" class="hidden inline-add-box">
+                                <input type="text" id="new-location" placeholder="Neuer Standort...">
+                                <input type="text" id="new-location-type" placeholder="Typ (z.B. Fahrzeug, Raum)..." value="Standort">
+                                <select id="new-location-parent"><option value="">-- Kein Übergeordneter --</option></select>
+                                <button type="button" class="btn-small" onclick="saveNewLocation()">Hinzufügen</button>
+                            </div>
                         </div>
                         <div>
                             <label>Status</label>
@@ -127,6 +140,12 @@
                                 <option value="reserve">Reserve</option>
                                 <option value="zur_reinigung">Zur Reinigung</option>
                             </select>
+                        </div>
+                        <div id="vehicle-location-box" class="hidden">
+                            <label>
+                                <input type="checkbox" id="obj-vehicle-as-location">
+                                Auch als Standort anlegen (z.B. für Geräte auf diesem Fahrzeug)
+                            </label>
                         </div>
                         <div>
                             <label>Anschaffungsdatum</label>

@@ -347,6 +347,46 @@ form input[type="text"][id^="new-"] {
     font-size: 0.9rem;
     background: #fafafa;
 }
+form label button {
+    margin-left: 0.5rem;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.8rem;
+    background: #1976d2;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+form label button:hover {
+    background: #1565c0;
+}
+.inline-add-box {
+    background: #f5f5f5;
+    border: 1px dashed #ccc;
+    border-radius: 6px;
+    padding: 0.6rem;
+    margin-top: 0.5rem;
+}
+.inline-add-box input, .inline-add-box select {
+    margin-bottom: 0.4rem;
+}
+#vehicle-location-box {
+    grid-column: 1 / -1;
+    background: #e3f2fd;
+    padding: 0.8rem;
+    border-radius: 6px;
+    margin-top: 0.5rem;
+}
+#vehicle-location-box label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-weight: normal;
+}
+#vehicle-location-box input[type="checkbox"] {
+    width: auto;
+}
 .form-actions {
     display: flex;
     justify-content: flex-end;
