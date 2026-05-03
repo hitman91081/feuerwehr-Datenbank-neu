@@ -330,6 +330,23 @@ def create_location(data: LocationCreate, db: Session = Depends(get_db), user: U
     db.refresh(loc)
     return loc
 
+@app.delete("/api/locations/{location_id}")
+def delete_location(location_id: int, db: Session = Depends(get_db), user: User = Depends(require_verwaltung)):
+    loc = db.query(Location).filter(Location.id == location_id).first()
+    if not loc:
+        raise HTTPException(status_code=404, detail="Standort nicht gefunden")
+    # Prüfe ob Standorte untergeordnet sind
+    children = db.query(Location).filter(Location.parent_id == location_id).count()
+    if children > 0:
+        raise HTTPException(status_code=400, detail="Standort hat untergeordnete Standorte und kann nicht gelöscht werden")
+    # Prüfe ob Objekte diesem Standort zugeordnet sind
+    objects_count = db.query(InventoryObject).filter(InventoryObject.location_id == location_id).count()
+    if objects_count > 0:
+        raise HTTPException(status_code=400, detail=f"Standort ist {objects_count} Objekt(en) zugeordnet und kann nicht gelöscht werden")
+    db.delete(loc)
+    db.commit()
+    return {"ok": True}
+
 # --- Standort-Objekte (rekursiv) ---
 
 def get_all_sub_location_ids(db: Session, location_id: int) -> List[int]:
@@ -703,7 +720,7 @@ def get_qr_code(object_id: int, db: Session = Depends(get_db), user: User = Depe
     return FileResponse(f"uploads/qrcodes/{obj.qr_code.filename}")
 
 @app.get("/api/objects/{object_id}/sticker")
-def get_sticker(object_id: int, db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+def get_sticker(object_id: int, db: Session = Depends(get_db)):
     obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
     if not obj:
         raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
@@ -713,7 +730,7 @@ def get_sticker(object_id: int, db: Session = Depends(get_db), user: User = Depe
     return FileResponse(sticker_path)
 
 @app.get("/api/objects/{object_id}/sticker/print", response_class=HTMLResponse)
-def print_sticker(object_id: int, db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+def print_sticker(object_id: int, db: Session = Depends(get_db)):
     obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
     if not obj:
         raise HTTPException(status_code=404, detail="Objekt nicht gefunden")

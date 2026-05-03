@@ -875,6 +875,7 @@ function renderLocationTreeWithObjects(locs, allObjects, level = 0) {
     const indent = level * 20;
     const colors = ['#e3f2fd', '#f5f5f5', '#fafafa', '#fff8e1', '#f3e5f5'];
     const borderColors = ['#1976d2', '#388e3c', '#f57c00', '#7b1fa2', '#5d4037'];
+    const isAdmin = currentUser && currentUser.role === 'admin';
     
     let html = '<ul style="list-style:none; padding-left:0; margin:0;">';
     locs.forEach(l => {
@@ -885,13 +886,18 @@ function renderLocationTreeWithObjects(locs, allObjects, level = 0) {
         html += `<li style="margin:0.3rem 0; padding-left:${indent}px;">`;
         html += `<div style="padding:0.5rem; background:${colors[level % colors.length]}; border-radius:6px; border-left:3px solid ${borderColors[level % borderColors.length]};">`;
         
-        // Header mit Icon und Name
+        // Header mit Icon, Name und Löschen-Button
         html += `<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.3rem;">`;
         html += `<div>${hasChildren ? '📁' : '📂'} <strong>${escapeHtml(l.name)}</strong> <span style="color:#666; font-size:0.85rem;">(${escapeHtml(l.location_type)})</span></div>`;
+        html += `<div style="display:flex; gap:0.3rem; align-items:center;">`;
         if (objCount > 0) {
             html += `<span class="badge badge-reserve" style="font-size:0.75rem;">${objCount} Objekt${objCount > 1 ? 'e' : ''}</span>`;
         }
-        html += `</div>`;
+        // Löschen-Button nur für Admin und nur wenn keine Kinder und keine Objekte
+        if (isAdmin && !hasChildren && objCount === 0) {
+            html += `<button class="btn-primary btn-small btn-delete" onclick="deleteLocation(${l.id}, '${escapeHtml(l.name)}')" title="Standort löschen">🗑️</button>`;
+        }
+        html += `</div></div>`;
         
         // Objekte an diesem Standort
         if (locObjects.length > 0) {
@@ -913,6 +919,16 @@ function renderLocationTreeWithObjects(locs, allObjects, level = 0) {
     });
     html += '</ul>';
     return html;
+}
+
+async function deleteLocation(locationId, locationName) {
+    if (!confirm(`Standort "${locationName}" wirklich löschen?`)) return;
+    try {
+        await api('/api/locations/' + locationId, { method: 'DELETE' });
+        alert('Standort gelöscht!');
+        loadMasterDataLists();
+        loadMasterData();
+    } catch (e) { alert('Fehler: ' + e.message); }
 }
 
 function renderLocationTree(locs, level = 0) {
