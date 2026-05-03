@@ -232,6 +232,7 @@
                 <div class="admin-tabs">
                     <button class="admin-tab active" onclick="showAdminTab('users')">Benutzer</button>
                     <button class="admin-tab" onclick="showAdminTab('masterdata')">Stammdaten</button>
+                    <button class="admin-tab" onclick="showAdminTab('inspections')">Prüfkarten</button>
                 </div>
                 <div id="admin-users" class="admin-panel">
                     <button class="btn-primary" onclick="showUserForm()">+ Benutzer</button>
@@ -242,6 +243,37 @@
                     <div id="manufacturers-list"></div>
                     <h3>Standorte</h3>
                     <div id="locations-list"></div>
+                </div>
+                <div id="admin-inspections" class="admin-panel hidden">
+                    <button class="btn-primary" onclick="showInspectionTemplateForm()">+ Prüfkarte erstellen</button>
+                    <div id="inspection-templates-list" class="table-container"></div>
+                    
+                    <div id="inspection-template-form-box" class="hidden" style="margin-top:1rem; background:#f5f5f5; padding:1rem; border-radius:8px;">
+                        <h3>Neue Prüfkarte</h3>
+                        <form id="inspection-template-form" onsubmit="saveInspectionTemplate(event)">
+                            <div class="form-grid">
+                                <div>
+                                    <label>Name *</label>
+                                    <input type="text" id="tmpl-name" required placeholder="z.B. Feuerlöscher – jährliche Prüfung">
+                                </div>
+                                <div>
+                                    <label>Zugeordnete Kategorie</label>
+                                    <select id="tmpl-type"><option value="">-- Alle Kategorien --</option></select>
+                                </div>
+                            </div>
+                            <div>
+                                <label>Beschreibung</label>
+                                <textarea id="tmpl-desc" rows="2" placeholder="z.B. Prüfung nach DIN 14406"></textarea>
+                            </div>
+                            <h4>Prüffelder</h4>
+                            <div id="tmpl-fields-list"></div>
+                            <button type="button" class="btn-secondary" onclick="addTemplateField()">+ Feld hinzufügen</button>
+                            <div class="form-actions">
+                                <button type="button" class="btn-secondary" onclick="hideInspectionTemplateForm()">Abbrechen</button>
+                                <button type="submit" class="btn-primary">Prüfkarte speichern</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             </div>
         </main>

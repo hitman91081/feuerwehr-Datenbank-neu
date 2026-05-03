@@ -626,8 +626,10 @@ function showAdminTab(tab) {
     event.target.classList.add('active');
     document.getElementById('admin-users').classList.toggle('hidden', tab !== 'users');
     document.getElementById('admin-masterdata').classList.toggle('hidden', tab !== 'masterdata');
+    document.getElementById('admin-inspections').classList.toggle('hidden', tab !== 'inspections');
     if (tab === 'users') loadUsers();
     if (tab === 'masterdata') loadMasterDataLists();
+    if (tab === 'inspections') loadInspectionTemplatesList();
 }
 
 async function loadUsers() {
@@ -697,6 +699,121 @@ function renderLocationTree(locs, level = 0) {
     });
     html += '</ul>';
     return html;
+}
+
+// === Inspection Template Admin ===
+let templateFieldCount = 0;
+
+async function loadInspectionTemplatesList() {
+    try {
+        const templates = await api('/api/inspection-templates');
+        document.getElementById('inspection-templates-list').innerHTML = `
+            <table><thead><tr><th>Name</th><th>Beschreibung</th><th>Kategorie</th><th>Felder</th><th>Aktionen</th></tr></thead>
+            <tbody>${templates.map(t => {
+                let fields = [];
+                try { fields = JSON.parse(t.fields); } catch(e) {}
+                return `
+                <tr>
+                    <td>${escapeHtml(t.name)}</td>
+                    <td>${escapeHtml(t.description || '-')}</td>
+                    <td>${t.object_type_id ? (masterData.types.find(ty => ty.id == t.object_type_id)?.name || '-') : 'Alle'}</td>
+                    <td>${fields.length} Felder</td>
+                    <td><button class="btn-primary btn-small btn-delete" onclick="deleteInspectionTemplate(${t.id})">Löschen</button></td>
+                </tr>
+                `;
+            }).join('')}</tbody></table>
+        `;
+    } catch (e) { console.error(e); }
+}
+
+function showInspectionTemplateForm() {
+    document.getElementById('inspection-template-form-box').classList.remove('hidden');
+    fillSelect('tmpl-type', masterData.types, 'name');
+    document.getElementById('tmpl-fields-list').innerHTML = '';
+    templateFieldCount = 0;
+    addTemplateField();
+}
+
+function hideInspectionTemplateForm() {
+    document.getElementById('inspection-template-form-box').classList.add('hidden');
+    document.getElementById('inspection-template-form').reset();
+}
+
+function addTemplateField() {
+    const container = document.getElementById('tmpl-fields-list');
+    const idx = templateFieldCount++;
+    const div = document.createElement('div');
+    div.className = 'inspection-field';
+    div.style.cssText = 'margin:0.5rem 0; padding:0.8rem; background:white; border-radius:6px;';
+    div.innerHTML = `
+        <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+            <input type="text" id="tmpl-f-${idx}-label" placeholder="Feldname *" required style="flex:2; min-width:200px;">
+            <select id="tmpl-f-${idx}-type" required style="flex:1; min-width:120px;">
+                <option value="checkbox">Checkbox (Ja/Nein)</option>
+                <option value="text">Text</option>
+                <option value="number">Zahl</option>
+                <option value="textarea">Mehrzeilig</option>
+                <option value="select">Auswahl</option>
+            </select>
+            <label style="display:flex; align-items:center; gap:0.3rem; font-weight:normal;">
+                <input type="checkbox" id="tmpl-f-${idx}-req"> Pflichtfeld
+            </label>
+            <button type="button" class="btn-primary btn-small btn-delete" onclick="this.parentElement.parentElement.remove()">🗑️</button>
+        </div>
+        <input type="text" id="tmpl-f-${idx}-opts" placeholder="Optionen mit Komma trennen (nur für Auswahl)" style="margin-top:0.4rem; width:100%; display:none;">
+    `;
+    container.appendChild(div);
+    
+    // Show/hide options field based on type
+    const typeSel = div.querySelector(`#tmpl-f-${idx}-type`);
+    const optsInput = div.querySelector(`#tmpl-f-${idx}-opts`);
+    typeSel.onchange = () => {
+        optsInput.style.display = typeSel.value === 'select' ? 'block' : 'none';
+    };
+}
+
+async function saveInspectionTemplate(e) {
+    e.preventDefault();
+    const fields = [];
+    for (let i = 0; i < templateFieldCount; i++) {
+        const label = document.getElementById(`tmpl-f-${i}-label`);
+        const type = document.getElementById(`tmpl-f-${i}-type`);
+        const req = document.getElementById(`tmpl-f-${i}-req`);
+        const opts = document.getElementById(`tmpl-f-${i}-opts`);
+        if (!label || !label.value.trim()) continue;
+        
+        const field = {
+            label: label.value.trim(),
+            type: type.value,
+            required: req ? req.checked : false
+        };
+        if (type.value === 'select' && opts && opts.value) {
+            field.options = opts.value.split(',').map(o => o.trim()).filter(o => o);
+        }
+        fields.push(field);
+    }
+    
+    if (fields.length === 0) return alert('Bitte mindestens ein Feld hinzufügen');
+    
+    const data = {
+        name: document.getElementById('tmpl-name').value,
+        description: document.getElementById('tmpl-desc').value || null,
+        fields: fields,
+        object_type_id: document.getElementById('tmpl-type').value ? parseInt(document.getElementById('tmpl-type').value) : null
+    };
+    
+    try {
+        await api('/api/inspection-templates', { method: 'POST', body: JSON.stringify(data) });
+        alert('Prüfkarte gespeichert!');
+        hideInspectionTemplateForm();
+        loadInspectionTemplatesList();
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+async function deleteInspectionTemplate(id) {
+    if (!confirm('Prüfkarte wirklich löschen?')) return;
+    await api('/api/inspection-templates/' + id, { method: 'DELETE' });
+    loadInspectionTemplatesList();
 }
 
 // === Inspection Functions ===

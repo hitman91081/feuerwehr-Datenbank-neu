@@ -786,6 +786,15 @@ def delete_inspection(inspection_id: int, db: Session = Depends(get_db), user: U
     db.commit()
     return {"ok": True}
 
+@app.delete("/api/inspection-templates/{template_id}")
+def delete_inspection_template(template_id: int, db: Session = Depends(get_db), user: User = Depends(require_verwaltung)):
+    t = db.query(InspectionTemplate).filter(InspectionTemplate.id == template_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Prüfkarte nicht gefunden")
+    db.delete(t)
+    db.commit()
+    return {"ok": True}
+
 # --- Frontend ---
 
 @app.get("/", response_class=HTMLResponse)
