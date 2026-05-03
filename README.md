@@ -1,117 +1,77 @@
-# Feuerwehr Datenbank
+# Feuerwehr Inventarverwaltung
 
-Eine einfache, aber leistungsfähige Web-Anwendung zur Verwaltung von Feuerwehr-Mitgliedern, Fahrzeugen und Einsätzen.
+Moderne Web-Anwendung zur Verwaltung von Feuerwehr-Equipment, Fahrzeugen und Ausrüstung mit QR-Code-Unterstützung.
 
 ## Funktionen
 
-- **Mitgliederverwaltung**: Verwalte alle Feuerwehrmitglieder mit Dienstnummer, Funktion, Kontaktdaten und Status.
-- **Fahrzeugverwaltung**: Behälte den Überblick über alle Fahrzeuge, deren Status und Inspektionstermine.
-- **Einsatzverwaltung**: Erfasse und verwalte Einsätze mit Stichwort, Adresse und Status.
-- **Responsives Design**: Funktioniert auf Desktop, Tablet und Smartphone.
-- **REST API**: Alle Daten sind über eine moderne API erreichbar (`/docs` für automatische Dokumentation).
+- **Benutzerverwaltung** mit 4 Rollen: Standardnutzer, Erweiterter Nutzer, Verwaltung, Admin
+- **Objektverwaltung**: Fahrzeuge, Gebrauchsgegenstände, Verbrauchsgegenstände, Ausrüstung
+- **Automatische ID- & QR-Code-Generierung** beim Anlegen
+- **Hierarchische Unterbringung** (z.B. Fahrzeug → Raum → Platz)
+- **Wartungsmanagement** mit Restzeit-Anzeige
+- **Reparaturverlauf** pro Objekt
+- **Dokumentenmanagement** (PDF, Bilder) mit Sichtbarkeitssteuerung
+- **Druckbare QR-Aufkleber**
+- **QR-Code Scanner** direkt im Browser (Smartphone-Kamera)
+- **Wikipedia-ähnliche Detailansicht** für einfache Bedienung
+- **Responsive Design** für Desktop, Tablet und Smartphone
 
 ## Technologien
 
 - **Backend**: Python, FastAPI, SQLAlchemy, SQLite
-- **Frontend**: HTML5, CSS3, Vanilla JavaScript
+- **Auth**: JWT-Token, bcrypt
+- **Frontend**: Vanilla JS, HTML5, CSS3
+- **QR-Codes**: `qrcode` Bibliothek mit Pillow
 - **Container**: Docker, Docker Compose
 
-## Lokale Entwicklung
+## Schnellstart (lokal)
 
-### Ohne Docker
+### 1. Abhängigkeiten installieren
 
 ```bash
-# Virtuelle Umgebung erstellen (empfohlen)
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
-
-# Abhängigkeiten installieren
-pip install -r requirements.txt
-
-# Server starten
-uvicorn app.main:app --reload
+cd "Feuerwehr Datenbank"
+pip3 install -r requirements.txt
 ```
 
-Die App ist dann unter `http://localhost:8000` erreichbar.
-Die API-Dokumentation findest du unter `http://localhost:8000/docs`.
-
-### Mit Docker
+### 2. Server starten
 
 ```bash
-# Container bauen und starten
+python3 -m uvicorn app.main:app --reload
+```
+
+### 3. App öffnen
+
+Im Browser: [http://localhost:8000](http://localhost:8000)
+
+**Standard-Login**: `admin` / `admin`
+
+### 4. API-Dokumentation
+
+[http://localhost:8000/docs](http://localhost:8000/docs)
+
+## Benutzerrollen & Rechte
+
+| Rolle | Objekte ansehen | Objekte bearbeiten | Benutzer verwalten |
+|-------|-----------------|--------------------|--------------------|
+| Standardnutzer | Ja (nur öffentl. Felder) | Nein | Nein |
+| Erweiterter Nutzer | Ja | Ja | Nein |
+| Verwaltung | Ja | Ja | Nein |
+| Admin | Ja | Ja | Ja |
+
+## Docker (VPS)
+
+```bash
 docker-compose up --build -d
-
-# Logs ansehen
-docker-compose logs -f
-
-# Container stoppen
-docker-compose down
 ```
 
-## Deployment auf einem VPS
+> **Wichtig**: Passe die `BASE_URL` Umgebungsvariable in der `docker-compose.yml` an deine Domain an, damit die QR-Codes korrekt funktionieren!
 
-### 1. GitHub Repository erstellen
-
-1. Erstelle ein neues Repository auf GitHub (z.B. `feuerwehr-datenbank`).
-2. Verbinde dein lokales Repository:
+## GitHub
 
 ```bash
-git remote add origin https://github.com/DEIN_USERNAME/feuerwehr-datenbank.git
+git remote add origin https://github.com/DEIN_USERNAME/feuerwehr-inventar.git
 git branch -M main
 git push -u origin main
-```
-
-**Alternative mit GitHub Desktop**: Öffne den Ordner in GitHub Desktop und veröffentliche das Repository.
-
-### 2. Auf dem VPS deployn
-
-Verbinde dich per SSH mit deinem VPS:
-
-```bash
-ssh benutzer@dein-vps.de
-```
-
-Dann führe aus:
-
-```bash
-# Repository klonen
-cd /opt
-git clone https://github.com/DEIN_USERNAME/feuerwehr-datenbank.git
-cd feuerwehr-datenbank
-
-# Docker Compose starten
-docker-compose up --build -d
-```
-
-### 3. Updates einspielen
-
-Wenn du Änderungen lokal machst und zu GitHub pushst:
-
-```bash
-# Auf dem VPS:
-cd /opt/feuerwehr-datenbank
-git pull
-docker-compose up --build -d
-```
-
-### 4. Reverse Proxy (empfohlen)
-
-Für den Produktivbetrieb solltest du einen Reverse Proxy wie **Nginx** oder **Traefik** verwenden, um HTTPS zu ermöglichen.
-
-#### Mit Nginx (Beispiel)
-
-```nginx
-server {
-    listen 80;
-    server_name feuerwehr.dein-domain.de;
-    
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
 ```
 
 ## Projektstruktur
@@ -119,28 +79,22 @@ server {
 ```
 .
 ├── app/
-│   ├── __init__.py
-│   ├── main.py          # FastAPI App & Endpunkte
-│   ├── database.py      # Datenbank-Modelle & Verbindung
-│   └── static/          # Frontend Dateien
-│       ├── index.html
-│       ├── css/
-│       │   └── style.css
-│       └── js/
-│           └── app.js
-├── data/                # SQLite Datenbank (Docker Volume)
+│   ├── main.py          # API Endpunkte
+│   ├── models.py        # Datenbank-Modelle
+│   ├── schemas.py       # Pydantic-Schemas
+│   ├── auth.py          # Authentifizierung
+│   ├── database.py      # DB-Verbindung
+│   └── static/          # Frontend
+├── uploads/             # Bilder, Dokumente, QR-Codes
+├── data/                # SQLite-Datenbank
 ├── Dockerfile
 ├── docker-compose.yml
-├── requirements.txt
-└── README.md
+└── requirements.txt
 ```
 
-## Datenbank
+## Hinweise
 
-Standardmäßig wird SQLite verwendet. Die Datenbankdatei wird im `data/`-Verzeichnis gespeichert und ist durch ein Docker-Volume persistiert.
-
-Für größere Installationen kannst du leicht auf PostgreSQL umstellen, indem du die `DATABASE_URL` Umgebungsvariable anpasst.
-
-## Lizenz
-
-MIT
+- Der Default-Admin wird beim ersten Start automatisch erstellt.
+- Ändere das Standard-Passwort sofort nach dem ersten Login!
+- Die SQLite-Datenbank wird im `data/`-Ordner persistiert.
+- Für den Produktivbetrieb solltest du `SECRET_KEY` und `BASE_URL` als Umgebungsvariablen setzen.
