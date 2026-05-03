@@ -204,7 +204,7 @@ main {
 .search-header {
     display: flex;
     gap: 0.5rem;
-    margin-bottom: 1rem;
+    margin-bottom: 0.5rem;
 }
 .search-header input {
     flex: 1;
@@ -212,6 +212,32 @@ main {
     border: 1px solid #ddd;
     border-radius: 6px;
     font-size: 1rem;
+}
+
+/* === Filter Bar === */
+.filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    padding: 0.6rem;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    align-items: center;
+}
+.filter-bar select {
+    flex: 1;
+    min-width: 150px;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    background: #fafafa;
+}
+.filter-bar .btn-small {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
 }
 
 /* === Cards === */

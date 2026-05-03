@@ -307,6 +307,48 @@ def search_objects(q: Optional[str] = None, db: Session = Depends(get_db), user:
 def list_objects(db: Session = Depends(get_db), user: User = Depends(require_any_user)):
     return search_objects(q=None, db=db, user=user)
 
+@app.get("/api/objects/browse", response_model=List[SearchResult])
+def browse_objects(
+    object_type_id: Optional[int] = None,
+    location_id: Optional[int] = None,
+    manufacturer_id: Optional[int] = None,
+    status: Optional[ObjectStatus] = None,
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_any_user)
+):
+    query = db.query(InventoryObject)
+    if object_type_id:
+        query = query.filter(InventoryObject.object_type_id == object_type_id)
+    if manufacturer_id:
+        query = query.filter(InventoryObject.manufacturer_id == manufacturer_id)
+    if status:
+        query = query.filter(InventoryObject.status == status)
+    if location_id:
+        loc_ids = get_all_sub_location_ids(db, location_id)
+        query = query.filter(InventoryObject.location_id.in_(loc_ids))
+    if q:
+        query = query.filter(
+            or_(
+                InventoryObject.designation.ilike(f"%{q}%"),
+                InventoryObject.object_number.ilike(f"%{q}%"),
+                InventoryObject.serial_number.ilike(f"%{q}%")
+            )
+        )
+    objects = query.order_by(InventoryObject.designation).all()
+    result = []
+    for obj in objects:
+        result.append(SearchResult(
+            id=obj.id,
+            designation=obj.designation,
+            object_number=obj.object_number,
+            object_type=obj.object_type.name if obj.object_type else None,
+            status=obj.status.value if obj.status else None,
+            title_image=obj.title_image,
+            location_name=obj.location.name if obj.location else None
+        ))
+    return result
+
 @app.post("/api/objects", response_model=InventoryObjectFullResponse)
 def create_object(
     data: InventoryObjectCreate,

@@ -100,6 +100,11 @@ async function loadMasterData() {
     fillSelect('obj-location', flattenLocations(masterData.locations), 'name');
     fillSelect('new-location-parent', flattenLocations(masterData.locations), 'name');
 
+    // Filter-Dropdowns füllen
+    fillFilterSelect('filter-type', masterData.types, 'name');
+    fillFilterSelect('filter-location', flattenLocations(masterData.locations), 'name');
+    fillFilterSelect('filter-manufacturer', masterData.manufacturers, 'name');
+
     // Typ-Änderung: Zeige "Als Standort anlegen" nur bei Fahrzeugen
     const typeSel = document.getElementById('obj-type');
     if (typeSel) {
@@ -114,6 +119,22 @@ async function loadMasterData() {
             }
         };
     }
+}
+
+function fillFilterSelect(id, items, labelKey) {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const currentVal = sel.value;
+    const firstOpt = sel.options[0];
+    sel.innerHTML = '';
+    if (firstOpt) sel.appendChild(firstOpt);
+    items.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.id;
+        opt.textContent = item[labelKey];
+        sel.appendChild(opt);
+    });
+    sel.value = currentVal;
 }
 
 function fillSelect(id, items, labelKey) {
@@ -196,16 +217,38 @@ async function loadDashboardAlerts() {
 let searchTimeout;
 function debouncedSearch() {
     clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(doSearch, 300);
+    searchTimeout = setTimeout(applyFilters, 300);
 }
 
-async function doSearch() {
+async function applyFilters() {
     const q = document.getElementById('search-input').value.trim();
-    if (!q) { document.getElementById('search-results').innerHTML = ''; return; }
+    const typeId = document.getElementById('filter-type').value;
+    const locId = document.getElementById('filter-location').value;
+    const manuId = document.getElementById('filter-manufacturer').value;
+    const status = document.getElementById('filter-status').value;
+
+    let url = '/api/objects/browse?';
+    const params = [];
+    if (q) params.push('q=' + encodeURIComponent(q));
+    if (typeId) params.push('object_type_id=' + encodeURIComponent(typeId));
+    if (locId) params.push('location_id=' + encodeURIComponent(locId));
+    if (manuId) params.push('manufacturer_id=' + encodeURIComponent(manuId));
+    if (status) params.push('status=' + encodeURIComponent(status));
+    url += params.join('&');
+
     try {
-        const results = await api('/api/objects/search?q=' + encodeURIComponent(q));
+        const results = await api(url);
         renderSearchResults(results);
     } catch (e) { console.error(e); }
+}
+
+function resetFilters() {
+    document.getElementById('search-input').value = '';
+    document.getElementById('filter-type').value = '';
+    document.getElementById('filter-location').value = '';
+    document.getElementById('filter-manufacturer').value = '';
+    document.getElementById('filter-status').value = '';
+    document.getElementById('search-results').innerHTML = '';
 }
 
 function renderSearchResults(results) {
@@ -255,10 +298,10 @@ function handleQrResult(text) {
     const match = text.match(/FFW-\d+/);
     if (match) {
         document.getElementById('search-input').value = match[0];
-        doSearch();
+        applyFilters();
     } else {
         document.getElementById('search-input').value = text;
-        doSearch();
+        applyFilters();
     }
 }
 
@@ -483,7 +526,7 @@ async function saveObject(e) {
 
         showView('search');
         document.getElementById('search-input').value = obj.object_number;
-        doSearch();
+        applyFilters();
     } catch (e) { alert('Fehler: ' + e.message); }
 }
 

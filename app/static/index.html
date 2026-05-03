@@ -71,6 +71,20 @@
                     <input type="text" id="search-input" placeholder="Suche nach Bezeichnung, ID oder Seriennummer..." oninput="debouncedSearch()">
                     <button class="btn-secondary" onclick="startQrScan()">📷 QR</button>
                 </div>
+                <div class="filter-bar">
+                    <select id="filter-type" onchange="applyFilters()"><option value="">Alle Kategorien</option></select>
+                    <select id="filter-location" onchange="applyFilters()"><option value="">Alle Standorte</option></select>
+                    <select id="filter-manufacturer" onchange="applyFilters()"><option value="">Alle Hersteller</option></select>
+                    <select id="filter-status" onchange="applyFilters()">
+                        <option value="">Alle Status</option>
+                        <option value="in_benutzung">In Benutzung</option>
+                        <option value="in_reparatur">In Reparatur</option>
+                        <option value="ausgemustert">Ausgemustert</option>
+                        <option value="reserve">Reserve</option>
+                        <option value="zur_reinigung">Zur Reinigung</option>
+                    </select>
+                    <button class="btn-secondary btn-small" onclick="resetFilters()">🔄 Reset</button>
+                </div>
                 <div id="search-results" class="card-list"></div>
             </div>
 
