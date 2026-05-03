@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feuerwehr Datenbank</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <h1>🚒 Feuerwehr Datenbank</h1>
+        <nav id="main-nav">
+            <button class="nav-btn active" data-tab="mitglieder">Mitglieder</button>
+            <button class="nav-btn" data-tab="fahrzeuge">Fahrzeuge</button>
+            <button class="nav-btn" data-tab="einsaetze">Einsätze</button>
+        </nav>
+    </header>
+
+    <main>
+        <!-- Mitglieder Tab -->
+        <section id="mitglieder" class="tab-content active">
+            <div class="section-header">
+                <h2>Mitglieder</h2>
+                <button class="btn-primary" onclick="openModal('mitglied')">+ Mitglied hinzufügen</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="search-mitglieder" placeholder="Suchen..." oninput="filterTable('mitglieder')">
+            </div>
+            <div class="table-container">
+                <table id="table-mitglieder">
+                    <thead>
+                        <tr>
+                            <th>Dienstnr.</th>
+                            <th>Name</th>
+                            <th>Funktion</th>
+                            <th>Status</th>
+                            <th>Telefon</th>
+                            <th>Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Fahrzeuge Tab -->
+        <section id="fahrzeuge" class="tab-content">
+            <div class="section-header">
+                <h2>Fahrzeuge</h2>
+                <button class="btn-primary" onclick="openModal('fahrzeug')">+ Fahrzeug hinzufügen</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="search-fahrzeuge" placeholder="Suchen..." oninput="filterTable('fahrzeuge')">
+            </div>
+            <div class="table-container">
+                <table id="table-fahrzeuge">
+                    <thead>
+                        <tr>
+                            <th>Kennzeichen</th>
+                            <th>Bezeichnung</th>
+                            <th>Status</th>
+                            <th>Nächste Inspektion</th>
+                            <th>Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Einsätze Tab -->
+        <section id="einsaetze" class="tab-content">
+            <div class="section-header">
+                <h2>Einsätze</h2>
+                <button class="btn-primary" onclick="openModal('einsatz')">+ Einsatz erfassen</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="search-einsaetze" placeholder="Suchen..." oninput="filterTable('einsaetze')">
+            </div>
+            <div class="table-container">
+                <table id="table-einsaetze">
+                    <thead>
+                        <tr>
+                            <th>Nr.</th>
+                            <th>Alarmierung</th>
+                            <th>Stichwort</th>
+                            <th>Adresse</th>
+                            <th>Status</th>
+                            <th>Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2 id="modal-title">Formular</h2>
+            <form id="modal-form" onsubmit="saveForm(event)">
+                <input type="hidden" id="edit-id">
+                <input type="hidden" id="edit-type">
+                <div id="form-fields"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeModal()">Abbrechen</button>
+                    <button type="submit" class="btn-primary">Speichern</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <footer>
+        <p>Feuerwehr Datenbank v1.0</p>
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
