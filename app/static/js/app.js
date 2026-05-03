@@ -405,6 +405,31 @@ function renderObjectDetail(obj) {
             `).join('');
             contentHtml += `</tbody></table>`;
         }
+
+        // Prüfungen
+        contentHtml += `<h2>Prüfungen</h2>`;
+        if (isFull) {
+            contentHtml += `<button class="btn-primary btn-small" onclick="openInspectionModal(${obj.id})">+ Neue Prüfung</button>`;
+        }
+        if (obj.inspections && obj.inspections.length) {
+            contentHtml += `<div style="margin-top:0.5rem;">`;
+            obj.inspections.forEach(i => {
+                const results = JSON.parse(i.results || '{}');
+                const resultSummary = Object.entries(results).map(([k, v]) => `${k}: ${v === true ? '✅' : v === false ? '❌' : v}`).join(', ');
+                contentHtml += `
+                    <div class="alert" style="margin-bottom:0.5rem;">
+                        <strong>${i.template_name || 'Prüfung'}</strong> – ${new Date(i.inspected_at).toLocaleDateString('de-DE')}<br>
+                        <small>Geprüft von: ${i.inspected_by_name || '-'}</small><br>
+                        ${resultSummary}<br>
+                        ${i.next_inspection_date ? `<small>Nächste Prüfung: ${i.next_inspection_date}</small>` : ''}
+                        ${i.notes ? `<br><em>${escapeHtml(i.notes)}</em>` : ''}
+                    </div>
+                `;
+            });
+            contentHtml += `</div>`;
+        } else {
+            contentHtml += `<p>Keine Prüfungen vorhanden.</p>`;
+        }
     }
 
     document.getElementById('detail-content').innerHTML = contentHtml;
@@ -674,6 +699,132 @@ function renderLocationTree(locs, level = 0) {
     return html;
 }
 
+// === Inspection Functions ===
+let inspectionTemplates = [];
+
+async function openInspectionModal(objectId) {
+    document.getElementById('inspection-object-id').value = objectId;
+    document.getElementById('inspection-modal').style.display = 'block';
+    document.getElementById('inspection-fields').innerHTML = '';
+    document.getElementById('inspection-next-date').value = '';
+    document.getElementById('inspection-notes').value = '';
+
+    try {
+        inspectionTemplates = await api('/api/inspection-templates');
+        const sel = document.getElementById('inspection-template');
+        sel.innerHTML = '<option value="">-- Prüfkarte wählen --</option>';
+        inspectionTemplates.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.id;
+            opt.textContent = t.name;
+            sel.appendChild(opt);
+        });
+    } catch (e) { alert('Fehler beim Laden der Prüfkarten: ' + e.message); }
+}
+
+function closeInspectionModal() {
+    document.getElementById('inspection-modal').style.display = 'none';
+}
+
+function loadInspectionTemplate() {
+    const templateId = document.getElementById('inspection-template').value;
+    const container = document.getElementById('inspection-fields');
+    if (!templateId) { container.innerHTML = ''; return; }
+
+    const template = inspectionTemplates.find(t => t.id == templateId);
+    if (!template) return;
+
+    let fields;
+    try {
+        fields = JSON.parse(template.fields);
+    } catch (e) { container.innerHTML = '<p>Fehler beim Laden der Prüfkarte</p>'; return; }
+
+    let html = `<h4>${escapeHtml(template.name)}</h4>`;
+    if (template.description) html += `<p><small>${escapeHtml(template.description)}</small></p>`;
+
+    fields.forEach((field, idx) => {
+        const required = field.required ? 'required' : '';
+        const reqLabel = field.required ? ' *' : '';
+        html += `<div class="inspection-field">`;
+
+        if (field.type === 'checkbox') {
+            html += `
+                <label>
+                    <input type="checkbox" id="ins-field-${idx}" name="${escapeHtml(field.label)}" ${required}>
+                    ${escapeHtml(field.label)}${reqLabel}
+                </label>
+            `;
+        } else if (field.type === 'select' && field.options) {
+            html += `<label>${escapeHtml(field.label)}${reqLabel}</label>`;
+            html += `<select id="ins-field-${idx}" ${required}>`;
+            html += `<option value="">-- Auswählen --</option>`;
+            field.options.forEach(opt => {
+                html += `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`;
+            });
+            html += `</select>`;
+        } else if (field.type === 'textarea') {
+            html += `<label>${escapeHtml(field.label)}${reqLabel}</label>`;
+            html += `<textarea id="ins-field-${idx}" rows="2" ${required}></textarea>`;
+        } else {
+            html += `<label>${escapeHtml(field.label)}${reqLabel}</label>`;
+            html += `<input type="${field.type}" id="ins-field-${idx}" ${required}>`;
+        }
+        html += `</div>`;
+    });
+
+    container.innerHTML = html;
+}
+
+async function saveInspection(e) {
+    e.preventDefault();
+    const objectId = document.getElementById('inspection-object-id').value;
+    const templateId = document.getElementById('inspection-template').value;
+    if (!templateId) return alert('Bitte eine Prüfkarte auswählen');
+
+    const template = inspectionTemplates.find(t => t.id == templateId);
+    if (!template) return;
+
+    let fields;
+    try {
+        fields = JSON.parse(template.fields);
+    } catch (e) { alert('Fehler beim Lesen der Prüfkarte'); return; }
+
+    const results = {};
+    let valid = true;
+    fields.forEach((field, idx) => {
+        const el = document.getElementById(`ins-field-${idx}`);
+        if (!el) return;
+        if (field.type === 'checkbox') {
+            results[field.label] = el.checked;
+        } else {
+            results[field.label] = el.value;
+        }
+        if (field.required && !results[field.label] && results[field.label] !== false) {
+            valid = false;
+            el.style.borderColor = 'red';
+        }
+    });
+
+    if (!valid) return alert('Bitte alle Pflichtfelder ausfüllen');
+
+    const data = {
+        template_id: parseInt(templateId),
+        results: results,
+        next_inspection_date: document.getElementById('inspection-next-date').value || null,
+        notes: document.getElementById('inspection-notes').value || null
+    };
+
+    try {
+        await api('/api/objects/' + objectId + '/inspections', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        closeInspectionModal();
+        alert('Prüfung gespeichert!');
+        openObject(parseInt(objectId));
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
 // === Utils ===
 function escapeHtml(text) {
     if (!text) return '';
@@ -692,6 +843,14 @@ function formatStatus(s) {
     };
     return map[s] || s;
 }
+
+// Modal close on outside click
+window.onclick = function(event) {
+    const modal = document.getElementById('inspection-modal');
+    if (event.target === modal) {
+        closeInspectionModal();
+    }
+};
 
 // === Init ===
 if (token) {

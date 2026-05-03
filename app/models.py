@@ -152,3 +152,38 @@ class QRCode(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     inventory_object = relationship("InventoryObject", back_populates="qr_code")
+
+# --- Prüfkarten ---
+class InspectionTemplate(Base):
+    __tablename__ = "inspection_templates"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    fields = Column(Text, nullable=False)  # JSON: [{"label": "Visueller Zustand", "type": "checkbox", "required": true}, ...]
+    object_type_id = Column(Integer, ForeignKey("object_types.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    object_type = relationship("ObjectType", back_populates="inspection_templates")
+    inspections = relationship("Inspection", back_populates="template")
+
+class Inspection(Base):
+    __tablename__ = "inspections"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    object_id = Column(Integer, ForeignKey("inventory_objects.id"), nullable=False)
+    template_id = Column(Integer, ForeignKey("inspection_templates.id"), nullable=False)
+    inspected_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    inspected_at = Column(DateTime, default=datetime.utcnow)
+    results = Column(Text, nullable=False)  # JSON: {"Visueller Zustand": true, "Druck": "12 bar", ...}
+    next_inspection_date = Column(String)  # YYYY-MM-DD
+    notes = Column(Text)
+    
+    inventory_object = relationship("InventoryObject", back_populates="inspections")
+    template = relationship("InspectionTemplate", back_populates="inspections")
+    inspected_by = relationship("User", back_populates="inspections")
+
+# Beziehungen zu bestehenden Modellen ergänzen
+ObjectType.inspection_templates = relationship("InspectionTemplate", back_populates="object_type")
+InventoryObject.inspections = relationship("Inspection", back_populates="inventory_object", cascade="all, delete-orphan", order_by="Inspection.inspected_at.desc()")
+User.inspections = relationship("Inspection", back_populates="inspected_by")

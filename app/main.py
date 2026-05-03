@@ -13,7 +13,8 @@ from sqlalchemy import or_, func
 from app.database import get_db, engine, Base
 from app.models import (
     User, UserRole, ObjectType, Manufacturer, Location, InventoryObject,
-    ObjectImage, Maintenance, Repair, Document, QRCode, ObjectStatus
+    ObjectImage, Maintenance, Repair, Document, QRCode, ObjectStatus,
+    InspectionTemplate, Inspection
 )
 from app.schemas import (
     Token, UserLogin, UserCreate, UserResponse, UserUpdate,
@@ -21,7 +22,8 @@ from app.schemas import (
     LocationCreate, LocationResponse, InventoryObjectCreate, InventoryObjectUpdate,
     InventoryObjectPublicResponse, InventoryObjectFullResponse,
     MaintenanceCreate, MaintenanceResponse, RepairCreate, RepairResponse,
-    DocumentResponse, SearchResult, QRCodeResponse
+    DocumentResponse, SearchResult, QRCodeResponse,
+    InspectionTemplateCreate, InspectionTemplateResponse, InspectionCreate, InspectionResponse
 )
 from app.auth import (
     verify_password, create_access_token, get_current_user,
@@ -72,6 +74,80 @@ def startup():
             db.add(ObjectType(name=name))
     if not db.query(Location).first():
         db.add(Location(name="Gerätehaus", location_type="Gerätehaus"))
+    
+    # Standard-Prüfkarten anlegen
+    if not db.query(InspectionTemplate).first():
+        import json
+        templates = [
+            {
+                "name": "Feuerlöscher – jährliche Prüfung",
+                "description": "Jährliche Prüfung von Feuerlöschern nach DIN 14406",
+                "fields": [
+                    {"label": "Visueller Zustand (Rost, Beschädigungen)", "type": "checkbox", "required": True},
+                    {"label": "Manometer im grünen Bereich", "type": "checkbox", "required": True},
+                    {"label": "Sicherheitsnadel vorhanden", "type": "checkbox", "required": True},
+                    {"label": "Bedienungsanleitung lesbar", "type": "checkbox", "required": True},
+                    {"label": "Standort erkennbar", "type": "checkbox", "required": True},
+                    {"label": "Gewicht (kg)", "type": "number", "required": False},
+                    {"label": "Druck (bar)", "type": "number", "required": False},
+                    {"label": "Bemerkungen", "type": "textarea", "required": False}
+                ]
+            },
+            {
+                "name": "Druckschlauch – halbjährliche Prüfung",
+                "description": "Prüfung von Druckschläuchen nach DIN 14811",
+                "fields": [
+                    {"label": "Visueller Zustand (Risse, Abrieb)", "type": "checkbox", "required": True},
+                    {"label": "Kupplungen beschädigt", "type": "checkbox", "required": True},
+                    {"label": "Dichtigkeitstest bestanden", "type": "checkbox", "required": True},
+                    {"label": "Länge (m)", "type": "number", "required": False},
+                    {"label": "Bemerkungen", "type": "textarea", "required": False}
+                ]
+            },
+            {
+                "name": "Atemschutzgerät – monatliche Prüfung",
+                "description": "Monatliche Funktionsprüfung des Atemschutzgeräts",
+                "fields": [
+                    {"label": "Flaschendruck > 180 bar", "type": "checkbox", "required": True},
+                    {"label": "Warnsignal funktioniert", "type": "checkbox", "required": True},
+                    {"label": "Maske undichtigkeitsfrei", "type": "checkbox", "required": True},
+                    {"label": "Tragegurt beschädigt", "type": "checkbox", "required": True},
+                    {"label": "Flaschendruck (bar)", "type": "number", "required": False},
+                    {"label": "Bemerkungen", "type": "textarea", "required": False}
+                ]
+            },
+            {
+                "name": "Fahrzeug – tägliche Kontrolle",
+                "description": "Tägliche Fahrzeugkontrolle vor Dienstbeginn",
+                "fields": [
+                    {"label": "Kraftstoffstand ausreichend", "type": "checkbox", "required": True},
+                    {"label": "Motorölstand OK", "type": "checkbox", "required": True},
+                    {"label": "Kühlmittelstand OK", "type": "checkbox", "required": True},
+                    {"label": "Beleuchtung funktionsfähig", "type": "checkbox", "required": True},
+                    {"label": "Reifendruck OK", "type": "checkbox", "required": True},
+                    {"label": "Warnblinkanlage funktioniert", "type": "checkbox", "required": True},
+                    {"label": "Kilometerstand", "type": "number", "required": False},
+                    {"label": "Bemerkungen", "type": "textarea", "required": False}
+                ]
+            },
+            {
+                "name": "Tauchpumpe – jährliche Prüfung",
+                "description": "Jährliche Prüfung der Tauchpumpe",
+                "fields": [
+                    {"label": "Visueller Zustand", "type": "checkbox", "required": True},
+                    {"label": "Motor läuft an", "type": "checkbox", "required": True},
+                    {"label": "Förderleistung OK", "type": "checkbox", "required": True},
+                    {"label": "Dichtungen intakt", "type": "checkbox", "required": True},
+                    {"label": "Bemerkungen", "type": "textarea", "required": False}
+                ]
+            }
+        ]
+        for t in templates:
+            db.add(InspectionTemplate(
+                name=t["name"],
+                description=t["description"],
+                fields=json.dumps(t["fields"])
+            ))
     db.commit()
 
 # --- Hilfsfunktionen ---
@@ -625,6 +701,90 @@ def print_sticker(object_id: int, db: Session = Depends(get_db), user: User = De
     </html>
     """
     return html
+
+# --- Prüfkarten & Prüfungen ---
+
+@app.get("/api/inspection-templates", response_model=List[InspectionTemplateResponse])
+def list_templates(db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    return db.query(InspectionTemplate).all()
+
+@app.post("/api/inspection-templates", response_model=InspectionTemplateResponse)
+def create_template(data: InspectionTemplateCreate, db: Session = Depends(get_db), user: User = Depends(require_verwaltung)):
+    import json
+    template = InspectionTemplate(
+        name=data.name,
+        description=data.description,
+        fields=json.dumps([f.model_dump() for f in data.fields]),
+        object_type_id=data.object_type_id
+    )
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    return template
+
+@app.get("/api/objects/{object_id}/inspections", response_model=List[InspectionResponse])
+def get_inspections(object_id: int, db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    inspections = db.query(Inspection).filter(Inspection.object_id == object_id).order_by(Inspection.inspected_at.desc()).all()
+    result = []
+    for i in inspections:
+        result.append(InspectionResponse(
+            id=i.id,
+            object_id=i.object_id,
+            template_id=i.template_id,
+            template_name=i.template.name if i.template else None,
+            inspected_by_name=i.inspected_by.full_name if i.inspected_by else None,
+            inspected_at=i.inspected_at,
+            results=i.results,
+            next_inspection_date=i.next_inspection_date,
+            notes=i.notes
+        ))
+    return result
+
+@app.post("/api/objects/{object_id}/inspections", response_model=InspectionResponse)
+def create_inspection(
+    object_id: int,
+    data: InspectionCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_erweitert)
+):
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    import json
+    inspection = Inspection(
+        object_id=object_id,
+        template_id=data.template_id,
+        inspected_by_id=user.id,
+        results=json.dumps(data.results),
+        next_inspection_date=data.next_inspection_date,
+        notes=data.notes
+    )
+    db.add(inspection)
+    db.commit()
+    db.refresh(inspection)
+    return InspectionResponse(
+        id=inspection.id,
+        object_id=inspection.object_id,
+        template_id=inspection.template_id,
+        template_name=inspection.template.name if inspection.template else None,
+        inspected_by_name=inspection.inspected_by.full_name if inspection.inspected_by else None,
+        inspected_at=inspection.inspected_at,
+        results=inspection.results,
+        next_inspection_date=inspection.next_inspection_date,
+        notes=inspection.notes
+    )
+
+@app.delete("/api/inspections/{inspection_id}")
+def delete_inspection(inspection_id: int, db: Session = Depends(get_db), user: User = Depends(require_verwaltung)):
+    i = db.query(Inspection).filter(Inspection.id == inspection_id).first()
+    if not i:
+        raise HTTPException(status_code=404, detail="Prüfung nicht gefunden")
+    db.delete(i)
+    db.commit()
+    return {"ok": True}
 
 # --- Frontend ---
 

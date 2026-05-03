@@ -103,6 +103,34 @@
                 </div>
             </div>
 
+            <!-- Inspection Modal -->
+            <div id="inspection-modal" class="modal">
+                <div class="modal-content">
+                    <span class="close" onclick="closeInspectionModal()">&times;</span>
+                    <h2 id="inspection-modal-title">Prüfung durchführen</h2>
+                    <form id="inspection-form" onsubmit="saveInspection(event)">
+                        <input type="hidden" id="inspection-object-id">
+                        <div>
+                            <label>Prüfkarte *</label>
+                            <select id="inspection-template" required onchange="loadInspectionTemplate()"></select>
+                        </div>
+                        <div id="inspection-fields"></div>
+                        <div>
+                            <label>Nächster Prüftermin</label>
+                            <input type="date" id="inspection-next-date">
+                        </div>
+                        <div>
+                            <label>Bemerkungen</label>
+                            <textarea id="inspection-notes" rows="2"></textarea>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn-secondary" onclick="closeInspectionModal()">Abbrechen</button>
+                            <button type="submit" class="btn-primary">Prüfung speichern</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
             <!-- Objects by Location -->
             <div id="view-location-objects" class="view hidden">
                 <h2 id="location-objects-title">Objekte am Standort</h2>
