@@ -342,6 +342,11 @@ form input, form select, form textarea {
     font-family: inherit;
 }
 form textarea { resize: vertical; }
+form input[type="text"][id^="new-"] {
+    margin-top: 0.4rem;
+    font-size: 0.9rem;
+    background: #fafafa;
+}
 .form-actions {
     display: flex;
     justify-content: flex-end;

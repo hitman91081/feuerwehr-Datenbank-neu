@@ -115,6 +115,8 @@
                         <div>
                             <label>Unterbringung</label>
                             <select id="obj-location"><option value="">-- Auswählen --</option></select>
+                            <input type="text" id="new-location" placeholder="Neuer Standort...">
+                            <input type="text" id="new-location-type" placeholder="Standort-Typ (z.B. Fahrzeug, Raum)...">
                         </div>
                         <div>
                             <label>Status</label>
@@ -146,6 +148,15 @@
                     <div>
                         <label>Wartungsnotizen</label>
                         <textarea id="obj-maint-notes" rows="2"></textarea>
+                    </div>
+                    <div>
+                        <label>Titelbild</label>
+                        <input type="file" id="obj-title-image" accept="image/*">
+                    </div>
+                    <div>
+                        <label>Dokumente hochladen (PDF, Bilder, Text)</label>
+                        <input type="file" id="obj-documents" multiple accept=".pdf,.txt,.md,image/*">
+                        <small>Mehrfachauswahl möglich</small>
                     </div>
                     <div class="form-actions">
                         <button type="button" class="btn-secondary" onclick="showView('search')">Abbrechen</button>

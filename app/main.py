@@ -56,7 +56,19 @@ def startup():
     create_default_admin(db)
     # Standard-Stammdaten anlegen
     if not db.query(ObjectType).first():
-        for name in ["Fahrzeug", "Gebrauchsgegenstand", "Verbrauchsgegenstand", "Ausrüstung"]:
+        for name in [
+            "Fahrzeug",
+            "Schutzkleidung und Schutzgeräte",
+            "Löschgeräte",
+            "Schläuche, Armaturen und Zubehör",
+            "Rettungsgeräte",
+            "Sanitäts- und Wiederbelebungsgeräte",
+            "Beleuchtungs-, Signal- und Fernmeldegeräte",
+            "Arbeitsgeräte",
+            "Handwerkzeuge und Messgeräte",
+            "Sondergeräte",
+            "Sonstiges"
+        ]:
             db.add(ObjectType(name=name))
     if not db.query(Location).first():
         db.add(Location(name="Gerätehaus", location_type="Gerätehaus"))

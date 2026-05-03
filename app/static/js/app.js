@@ -53,7 +53,6 @@ async function initApp() {
     document.getElementById('app-screen').classList.remove('hidden');
     document.getElementById('user-name').textContent = currentUser.full_name;
 
-    // Rechte anwenden
     const isAdmin = currentUser.role === 'admin';
     const isVerwaltung = currentUser.role === 'verwaltung';
     const isErweitert = currentUser.role === 'erweitert';
@@ -129,15 +128,7 @@ function flattenLocations(locations, prefix = '') {
 // === Dashboard ===
 async function loadDashboardAlerts() {
     if (currentUser.role === 'standard') return;
-    try {
-        const objects = await api('/api/objects/search');
-        const alerts = [];
-        // Wir brauchen die Details für Wartungen - das wäre zu viele Requests.
-        // Für das MVP zeigen wir keine Dashboard-Wartungsalerts, sondern nur in der Detailansicht.
-        document.getElementById('maintenance-alerts').innerHTML = alerts.length
-            ? alerts.map(a => `<div class="alert">${a}</div>`).join('')
-            : '';
-    } catch (e) { console.error(e); }
+    document.getElementById('maintenance-alerts').innerHTML = '';
 }
 
 // === Search ===
@@ -200,7 +191,6 @@ function stopQrScan() {
 }
 
 function handleQrResult(text) {
-    // Erwartet: http://.../?q=FFW-00001 oder einfach FFW-00001
     const match = text.match(/FFW-\d+/);
     if (match) {
         document.getElementById('search-input').value = match[0];
@@ -270,8 +260,16 @@ function renderObjectDetail(obj) {
         contentHtml += `</div>`;
     }
 
+    // Upload-Bereich für berechtigte Nutzer
     if (isFull) {
-        // Bilder Zustand
+        contentHtml += `
+            <h2>Dokumente hochladen</h2>
+            <input type="file" id="detail-doc-upload" multiple accept=".pdf,.txt,.md,image/*" onchange="uploadDetailDocs(${obj.id})">
+            <small>PDF, Bilder, Textdateien – werden sofort hochgeladen</small>
+        `;
+    }
+
+    if (isFull) {
         if (obj.images && obj.images.length) {
             contentHtml += `<h2>Bilder</h2><div class="gallery">`;
             contentHtml += obj.images.map(img => `
@@ -280,7 +278,6 @@ function renderObjectDetail(obj) {
             contentHtml += `</div>`;
         }
 
-        // Wartung
         if (obj.maintenances && obj.maintenances.length) {
             contentHtml += `<h2>Wartung</h2>`;
             obj.maintenances.forEach(m => {
@@ -297,7 +294,6 @@ function renderObjectDetail(obj) {
             });
         }
 
-        // Reparaturen
         if (obj.repairs && obj.repairs.length) {
             contentHtml += `<h2>Reparaturverlauf</h2><table><thead><tr><th>Datum</th><th>Beschreibung</th><th>Kosten</th></tr></thead><tbody>`;
             contentHtml += obj.repairs.map(r => `
@@ -308,6 +304,21 @@ function renderObjectDetail(obj) {
     }
 
     document.getElementById('detail-content').innerHTML = contentHtml;
+}
+
+async function uploadDetailDocs(objectId) {
+    const input = document.getElementById('detail-doc-upload');
+    if (!input.files.length) return;
+    for (const file of input.files) {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('is_public', 'true');
+        try {
+            await uploadFile('/api/objects/' + objectId + '/documents', fd);
+        } catch (e) { alert('Fehler beim Upload: ' + e.message); }
+    }
+    alert('Dokumente hochgeladen!');
+    openObject(objectId);
 }
 
 function daysUntil(dateStr) {
@@ -340,7 +351,24 @@ async function saveObject(e) {
         try {
             const m = await api('/api/manufacturers', { method: 'POST', body: JSON.stringify({ name: newManu }) });
             data.manufacturer_id = m.id;
-        } catch (e) { alert('Hersteller konnte nicht angelegt werden'); return; }
+            masterData.manufacturers.push(m);
+            fillSelect('obj-manufacturer', masterData.manufacturers, 'name');
+            document.getElementById('obj-manufacturer').value = m.id;
+        } catch (e) { alert('Hersteller konnte nicht angelegt werden: ' + e.message); return; }
+    }
+
+    // Neuer Standort?
+    const newLoc = document.getElementById('new-location').value.trim();
+    const newLocType = document.getElementById('new-location-type').value.trim();
+    if (newLoc && !data.location_id) {
+        try {
+            const loc = await api('/api/locations', { method: 'POST', body: JSON.stringify({ name: newLoc, location_type: newLocType || 'Standort' }) });
+            data.location_id = loc.id;
+            // Locations neu laden
+            masterData.locations = await api('/api/locations');
+            fillSelect('obj-location', flattenLocations(masterData.locations), 'name');
+            document.getElementById('obj-location').value = loc.id;
+        } catch (e) { alert('Standort konnte nicht angelegt werden: ' + e.message); return; }
     }
 
     try {
@@ -356,7 +384,25 @@ async function saveObject(e) {
             await uploadFile('/api/objects/' + obj.id + '/title-image', fd);
         }
 
+        // Dokumente upload
+        const docInput = document.getElementById('obj-documents');
+        if (docInput && docInput.files.length) {
+            for (const file of docInput.files) {
+                const fd = new FormData();
+                fd.append('file', file);
+                fd.append('is_public', 'true');
+                await uploadFile('/api/objects/' + obj.id + '/documents', fd);
+            }
+        }
+
         alert('Gespeichert!');
+        // Formular zurücksetzen
+        document.getElementById('object-form').reset();
+        document.getElementById('edit-object-id').value = '';
+        document.getElementById('new-manufacturer').value = '';
+        document.getElementById('new-location').value = '';
+        document.getElementById('new-location-type').value = '';
+
         showView('search');
         document.getElementById('search-input').value = obj.object_number;
         doSearch();
@@ -366,6 +412,8 @@ async function saveObject(e) {
 async function editObject(id) {
     try {
         const obj = await api('/api/objects/' + id);
+        await loadMasterData(); // Stellt sicher, dass alle Dropdowns aktuell sind
+
         document.getElementById('edit-object-id').value = obj.id;
         document.getElementById('obj-designation').value = obj.designation;
         document.getElementById('obj-type').value = obj.object_type ? obj.object_type.id : '';
@@ -377,6 +425,8 @@ async function editObject(id) {
         document.getElementById('obj-info').value = obj.info_text || '';
         document.getElementById('obj-hints').value = obj.usage_hints || '';
         document.getElementById('new-manufacturer').value = '';
+        document.getElementById('new-location').value = '';
+        document.getElementById('new-location-type').value = '';
 
         if (obj.maintenances && obj.maintenances[0]) {
             document.getElementById('obj-maint-days').value = obj.maintenances[0].interval_days;
@@ -390,14 +440,6 @@ async function editObject(id) {
         showView('edit-object');
     } catch (e) { alert('Fehler: ' + e.message); }
 }
-
-// Füge Titelbild-Input dynamisch zum Formular hinzu
-(function setupForm() {
-    const formGrid = document.querySelector('#object-form .form-grid');
-    const div = document.createElement('div');
-    div.innerHTML = `<label>Titelbild</label><input type="file" id="obj-title-image" accept="image/*">`;
-    formGrid.appendChild(div);
-})();
 
 // === Admin ===
 function showAdminTab(tab) {
