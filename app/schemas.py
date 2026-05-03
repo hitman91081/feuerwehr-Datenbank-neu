@@ -117,6 +117,48 @@ class QRCodeResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# --- Inspection Schemas ---
+class InspectionField(BaseModel):
+    label: str
+    type: str  # checkbox, text, number, select, textarea
+    required: bool = False
+    options: Optional[List[str]] = None  # Für select
+
+class InspectionTemplateCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    fields: List[InspectionField]
+    object_type_id: Optional[int] = None
+
+class InspectionTemplateResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    fields: str  # JSON string
+    object_type_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+class InspectionCreate(BaseModel):
+    template_id: int
+    results: dict
+    next_inspection_date: Optional[str] = None
+    notes: Optional[str] = None
+
+class InspectionResponse(BaseModel):
+    id: int
+    object_id: int
+    template_id: int
+    template_name: Optional[str] = None
+    inspected_by_name: Optional[str] = None
+    inspected_at: Optional[datetime] = None
+    results: str  # JSON string
+    next_inspection_date: Optional[str] = None
+    notes: Optional[str] = None
+    class Config:
+        from_attributes = True
+
 # Öffentliches Schema (Standardnutzer)
 class InventoryObjectPublicResponse(BaseModel):
     id: int
@@ -153,6 +195,7 @@ class InventoryObjectFullResponse(BaseModel):
     maintenances: List[MaintenanceResponse] = []
     repairs: List[RepairResponse] = []
     documents: List[DocumentResponse] = []
+    inspections: List[InspectionResponse] = []
     qr_code: Optional[QRCodeResponse] = None
     class Config:
         from_attributes = True
@@ -204,47 +247,5 @@ class SearchResult(BaseModel):
     status: Optional[str] = None
     title_image: Optional[str] = None
     location_name: Optional[str] = None
-    class Config:
-        from_attributes = True
-
-# --- Inspection Schemas ---
-class InspectionField(BaseModel):
-    label: str
-    type: str  # checkbox, text, number, select, textarea
-    required: bool = False
-    options: Optional[List[str]] = None  # Für select
-
-class InspectionTemplateCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-    fields: List[InspectionField]
-    object_type_id: Optional[int] = None
-
-class InspectionTemplateResponse(BaseModel):
-    id: int
-    name: str
-    description: Optional[str] = None
-    fields: str  # JSON string
-    object_type_id: Optional[int] = None
-    created_at: Optional[datetime] = None
-    class Config:
-        from_attributes = True
-
-class InspectionCreate(BaseModel):
-    template_id: int
-    results: dict
-    next_inspection_date: Optional[str] = None
-    notes: Optional[str] = None
-
-class InspectionResponse(BaseModel):
-    id: int
-    object_id: int
-    template_id: int
-    template_name: Optional[str] = None
-    inspected_by_name: Optional[str] = None
-    inspected_at: Optional[datetime] = None
-    results: str  # JSON string
-    next_inspection_date: Optional[str] = None
-    notes: Optional[str] = None
     class Config:
         from_attributes = True

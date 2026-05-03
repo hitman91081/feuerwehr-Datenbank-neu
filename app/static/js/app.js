@@ -415,14 +415,26 @@ function renderObjectDetail(obj) {
             contentHtml += `<div style="margin-top:0.5rem;">`;
             obj.inspections.forEach(i => {
                 const results = JSON.parse(i.results || '{}');
-                const resultSummary = Object.entries(results).map(([k, v]) => `${k}: ${v === true ? '✅' : v === false ? '❌' : v}`).join(', ');
+                // Kurze Zusammenfassung: Anzahl OK / Nicht OK
+                let okCount = 0, failCount = 0;
+                Object.entries(results).forEach(([k, v]) => {
+                    if (v === true) okCount++;
+                    else if (v === false) failCount++;
+                });
+                const statusBadge = failCount > 0 
+                    ? `<span class="badge badge-in_reparatur">${failCount} Mängel</span>` 
+                    : `<span class="badge badge-in_benutzung">OK</span>`;
+                
                 contentHtml += `
                     <div class="alert" style="margin-bottom:0.5rem;">
-                        <strong>${i.template_name || 'Prüfung'}</strong> – ${new Date(i.inspected_at).toLocaleDateString('de-DE')}<br>
-                        <small>Geprüft von: ${i.inspected_by_name || '-'}</small><br>
-                        ${resultSummary}<br>
-                        ${i.next_inspection_date ? `<small>Nächste Prüfung: ${i.next_inspection_date}</small>` : ''}
-                        ${i.notes ? `<br><em>${escapeHtml(i.notes)}</em>` : ''}
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.5rem;">
+                            <div>
+                                <strong>${i.template_name || 'Prüfung'}</strong> ${statusBadge}<br>
+                                <small>📅 ${new Date(i.inspected_at).toLocaleDateString('de-DE')} | 👤 ${i.inspected_by_name || '-'}</small>
+                            </div>
+                            <button class="btn-primary btn-small" onclick="viewInspection(${i.id}, '${escapeHtml(i.template_name || 'Prüfung')}', '${i.inspected_at}', '${i.inspected_by_name || '-'}')">👁️ Ansehen</button>
+                        </div>
+                        ${i.next_inspection_date ? `<small style="display:block; margin-top:0.3rem;">Nächste Prüfung: ${i.next_inspection_date}</small>` : ''}
                     </div>
                 `;
             });
@@ -703,6 +715,7 @@ function renderLocationTree(locs, level = 0) {
 
 // === Inspection Template Admin ===
 let templateFieldCount = 0;
+let templateEditId = null;
 
 async function loadInspectionTemplatesList() {
     try {
@@ -718,7 +731,10 @@ async function loadInspectionTemplatesList() {
                     <td>${escapeHtml(t.description || '-')}</td>
                     <td>${t.object_type_id ? (masterData.types.find(ty => ty.id == t.object_type_id)?.name || '-') : 'Alle'}</td>
                     <td>${fields.length} Felder</td>
-                    <td><button class="btn-primary btn-small btn-delete" onclick="deleteInspectionTemplate(${t.id})">Löschen</button></td>
+                    <td>
+                        <button class="btn-primary btn-small" onclick="editInspectionTemplate(${t.id})">Bearbeiten</button>
+                        <button class="btn-primary btn-small btn-delete" onclick="deleteInspectionTemplate(${t.id})">Löschen</button>
+                    </td>
                 </tr>
                 `;
             }).join('')}</tbody></table>
@@ -727,9 +743,12 @@ async function loadInspectionTemplatesList() {
 }
 
 function showInspectionTemplateForm() {
+    templateEditId = null;
     document.getElementById('inspection-template-form-box').classList.remove('hidden');
     fillSelect('tmpl-type', masterData.types, 'name');
     document.getElementById('tmpl-fields-list').innerHTML = '';
+    document.getElementById('tmpl-name').value = '';
+    document.getElementById('tmpl-desc').value = '';
     templateFieldCount = 0;
     addTemplateField();
 }
@@ -737,6 +756,60 @@ function showInspectionTemplateForm() {
 function hideInspectionTemplateForm() {
     document.getElementById('inspection-template-form-box').classList.add('hidden');
     document.getElementById('inspection-template-form').reset();
+    templateEditId = null;
+}
+
+async function editInspectionTemplate(id) {
+    try {
+        const t = await api('/api/inspection-templates/' + id);
+        templateEditId = id;
+        document.getElementById('inspection-template-form-box').classList.remove('hidden');
+        fillSelect('tmpl-type', masterData.types, 'name');
+        document.getElementById('tmpl-name').value = t.name;
+        document.getElementById('tmpl-desc').value = t.description || '';
+        document.getElementById('tmpl-type').value = t.object_type_id || '';
+        
+        // Felder laden
+        document.getElementById('tmpl-fields-list').innerHTML = '';
+        templateFieldCount = 0;
+        let fields = [];
+        try { fields = JSON.parse(t.fields); } catch(e) {}
+        fields.forEach(f => {
+            const idx = templateFieldCount++;
+            const container = document.getElementById('tmpl-fields-list');
+            const div = document.createElement('div');
+            div.className = 'inspection-field';
+            div.style.cssText = 'margin:0.5rem 0; padding:0.8rem; background:white; border-radius:6px;';
+            div.innerHTML = `
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                    <input type="text" id="tmpl-f-${idx}-label" placeholder="Feldname *" required style="flex:2; min-width:200px;" value="${escapeHtml(f.label)}">
+                    <select id="tmpl-f-${idx}-type" required style="flex:1; min-width:120px;">
+                        <option value="checkbox" ${f.type === 'checkbox' ? 'selected' : ''}>Checkbox (Ja/Nein)</option>
+                        <option value="text" ${f.type === 'text' ? 'selected' : ''}>Text</option>
+                        <option value="number" ${f.type === 'number' ? 'selected' : ''}>Zahl</option>
+                        <option value="textarea" ${f.type === 'textarea' ? 'selected' : ''}>Mehrzeilig</option>
+                        <option value="select" ${f.type === 'select' ? 'selected' : ''}>Auswahl</option>
+                    </select>
+                    <label style="display:flex; align-items:center; gap:0.3rem; font-weight:normal;">
+                        <input type="checkbox" id="tmpl-f-${idx}-req" ${f.required ? 'checked' : ''}> Pflichtfeld
+                    </label>
+                    <button type="button" class="btn-primary btn-small btn-delete" onclick="this.parentElement.parentElement.remove()">🗑️</button>
+                </div>
+                <input type="text" id="tmpl-f-${idx}-opts" placeholder="Optionen mit Komma trennen (nur für Auswahl)" style="margin-top:0.4rem; width:100%; ${f.type === 'select' ? '' : 'display:none;'}">
+            `;
+            container.appendChild(div);
+            
+            if (f.options && f.options.length) {
+                div.querySelector(`#tmpl-f-${idx}-opts`).value = f.options.join(', ');
+            }
+            
+            const typeSel = div.querySelector(`#tmpl-f-${idx}-type`);
+            const optsInput = div.querySelector(`#tmpl-f-${idx}-opts`);
+            typeSel.onchange = () => {
+                optsInput.style.display = typeSel.value === 'select' ? 'block' : 'none';
+            };
+        });
+    } catch (e) { alert('Fehler: ' + e.message); }
 }
 
 function addTemplateField() {
@@ -803,8 +876,13 @@ async function saveInspectionTemplate(e) {
     };
     
     try {
-        await api('/api/inspection-templates', { method: 'POST', body: JSON.stringify(data) });
-        alert('Prüfkarte gespeichert!');
+        if (templateEditId) {
+            await api('/api/inspection-templates/' + templateEditId, { method: 'PUT', body: JSON.stringify(data) });
+            alert('Prüfkarte aktualisiert!');
+        } else {
+            await api('/api/inspection-templates', { method: 'POST', body: JSON.stringify(data) });
+            alert('Prüfkarte gespeichert!');
+        }
         hideInspectionTemplateForm();
         loadInspectionTemplatesList();
     } catch (e) { alert('Fehler: ' + e.message); }
@@ -961,11 +1039,64 @@ function formatStatus(s) {
     return map[s] || s;
 }
 
+// === View Old Inspection ===
+async function viewInspection(inspectionId, templateName, inspectedAt, inspectedBy) {
+    try {
+        const i = await api('/api/inspections/' + inspectionId);
+        let results = {};
+        try { results = JSON.parse(i.results); } catch(e) {}
+        
+        document.getElementById('view-inspection-title').textContent = templateName || 'Prüfung';
+        
+        let html = `
+            <div style="margin-bottom:1rem; padding:0.8rem; background:#f5f5f5; border-radius:6px;">
+                <strong>📅 Prüfdatum:</strong> ${new Date(inspectedAt).toLocaleDateString('de-DE')}<br>
+                <strong>👤 Prüfer:</strong> ${escapeHtml(inspectedBy)}<br>
+                ${i.next_inspection_date ? `<strong>📌 Nächste Prüfung:</strong> ${i.next_inspection_date}<br>` : ''}
+            </div>
+            <h3>Prüfergebnisse</h3>
+        `;
+        
+        Object.entries(results).forEach(([key, value]) => {
+            let displayValue;
+            if (value === true) displayValue = '<span style="color:#2e7d32; font-weight:600;">✅ Ja / OK</span>';
+            else if (value === false) displayValue = '<span style="color:#c62828; font-weight:600;">❌ Nein / Mangel</span>';
+            else if (value === '' || value === null || value === undefined) displayValue = '<span style="color:#999;">–</span>';
+            else displayValue = escapeHtml(String(value));
+            
+            html += `
+                <div class="inspection-field" style="margin:0.5rem 0;">
+                    <strong>${escapeHtml(key)}</strong><br>
+                    ${displayValue}
+                </div>
+            `;
+        });
+        
+        if (i.notes) {
+            html += `
+                <h3>Bemerkungen</h3>
+                <div class="inspection-field">${escapeHtml(i.notes).replace(/\n/g, '<br>')}</div>
+            `;
+        }
+        
+        document.getElementById('view-inspection-body').innerHTML = html;
+        document.getElementById('view-inspection-modal').style.display = 'block';
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+function closeViewInspectionModal() {
+    document.getElementById('view-inspection-modal').style.display = 'none';
+}
+
 // Modal close on outside click
 window.onclick = function(event) {
-    const modal = document.getElementById('inspection-modal');
-    if (event.target === modal) {
+    const modal1 = document.getElementById('inspection-modal');
+    const modal2 = document.getElementById('view-inspection-modal');
+    if (event.target === modal1) {
         closeInspectionModal();
+    }
+    if (event.target === modal2) {
+        closeViewInspectionModal();
     }
 };
 

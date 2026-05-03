@@ -22,7 +22,7 @@ from app.schemas import (
     LocationCreate, LocationResponse, InventoryObjectCreate, InventoryObjectUpdate,
     InventoryObjectPublicResponse, InventoryObjectFullResponse,
     MaintenanceCreate, MaintenanceResponse, RepairCreate, RepairResponse,
-    DocumentResponse, SearchResult, QRCodeResponse,
+    DocumentResponse, SearchResult, QRCodeResponse, ObjectImageResponse,
     InspectionTemplateCreate, InspectionTemplateResponse, InspectionCreate, InspectionResponse
 )
 from app.auth import (
@@ -501,7 +501,43 @@ def get_object(object_id: int, db: Session = Depends(get_db), user: User = Depen
             qr_code=QRCodeResponse(id=obj.qr_code.id, filename=obj.qr_code.filename, created_at=obj.qr_code.created_at) if obj.qr_code else None
         )
     
-    return InventoryObjectFullResponse.model_validate(obj)
+    # Vollständige Antwort mit aufgelösten Inspections
+    inspections = []
+    for i in obj.inspections:
+        inspections.append(InspectionResponse(
+            id=i.id,
+            object_id=i.object_id,
+            template_id=i.template_id,
+            template_name=i.template.name if i.template else None,
+            inspected_by_name=i.inspected_by.full_name if i.inspected_by else None,
+            inspected_at=i.inspected_at,
+            results=i.results,
+            next_inspection_date=i.next_inspection_date,
+            notes=i.notes
+        ))
+    
+    return InventoryObjectFullResponse(
+        id=obj.id,
+        object_type=ObjectTypeResponse(id=obj.object_type.id, name=obj.object_type.name) if obj.object_type else None,
+        designation=obj.designation,
+        object_number=obj.object_number,
+        serial_number=obj.serial_number,
+        manufacturer=ManufacturerResponse(id=obj.manufacturer.id, name=obj.manufacturer.name) if obj.manufacturer else None,
+        location=LocationResponse(id=obj.location.id, name=obj.location.name, location_type=obj.location.location_type, parent_id=obj.location.parent_id) if obj.location else None,
+        title_image=obj.title_image,
+        info_text=obj.info_text,
+        usage_hints=obj.usage_hints,
+        acquisition_date=obj.acquisition_date,
+        status=obj.status,
+        created_at=obj.created_at,
+        updated_at=obj.updated_at,
+        images=[ObjectImageResponse.model_validate(img) for img in obj.images],
+        maintenances=[MaintenanceResponse.model_validate(m) for m in obj.maintenances],
+        repairs=[RepairResponse.model_validate(r) for r in obj.repairs],
+        documents=[DocumentResponse.model_validate(d) for d in obj.documents],
+        inspections=inspections,
+        qr_code=QRCodeResponse(id=obj.qr_code.id, filename=obj.qr_code.filename, created_at=obj.qr_code.created_at) if obj.qr_code else None
+    )
 
 @app.put("/api/objects/{object_id}", response_model=InventoryObjectFullResponse)
 def update_object(
@@ -722,6 +758,27 @@ def create_template(data: InspectionTemplateCreate, db: Session = Depends(get_db
     db.refresh(template)
     return template
 
+@app.get("/api/inspection-templates/{template_id}", response_model=InspectionTemplateResponse)
+def get_template(template_id: int, db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    t = db.query(InspectionTemplate).filter(InspectionTemplate.id == template_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Prüfkarte nicht gefunden")
+    return t
+
+@app.put("/api/inspection-templates/{template_id}", response_model=InspectionTemplateResponse)
+def update_template(template_id: int, data: InspectionTemplateCreate, db: Session = Depends(get_db), user: User = Depends(require_verwaltung)):
+    t = db.query(InspectionTemplate).filter(InspectionTemplate.id == template_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Prüfkarte nicht gefunden")
+    import json
+    t.name = data.name
+    t.description = data.description
+    t.fields = json.dumps([f.model_dump() for f in data.fields])
+    t.object_type_id = data.object_type_id
+    db.commit()
+    db.refresh(t)
+    return t
+
 @app.get("/api/objects/{object_id}/inspections", response_model=List[InspectionResponse])
 def get_inspections(object_id: int, db: Session = Depends(get_db), user: User = Depends(require_any_user)):
     obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
@@ -775,6 +832,23 @@ def create_inspection(
         results=inspection.results,
         next_inspection_date=inspection.next_inspection_date,
         notes=inspection.notes
+    )
+
+@app.get("/api/inspections/{inspection_id}", response_model=InspectionResponse)
+def get_inspection(inspection_id: int, db: Session = Depends(get_db), user: User = Depends(require_any_user)):
+    i = db.query(Inspection).filter(Inspection.id == inspection_id).first()
+    if not i:
+        raise HTTPException(status_code=404, detail="Prüfung nicht gefunden")
+    return InspectionResponse(
+        id=i.id,
+        object_id=i.object_id,
+        template_id=i.template_id,
+        template_name=i.template.name if i.template else None,
+        inspected_by_name=i.inspected_by.full_name if i.inspected_by else None,
+        inspected_at=i.inspected_at,
+        results=i.results,
+        next_inspection_date=i.next_inspection_date,
+        notes=i.notes
     )
 
 @app.delete("/api/inspections/{inspection_id}")
