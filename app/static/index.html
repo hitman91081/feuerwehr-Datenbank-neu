@@ -288,6 +288,25 @@
         </div>
     </div>
 
+    <!-- Delete Confirm Modal -->
+    <div id="delete-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeDeleteModal()">&times;</span>
+            <h2>⚠️ Objekt löschen</h2>
+            <p id="delete-msg">Sind Sie sicher, dass Sie dieses Objekt löschen möchten?</p>
+            <div id="delete-code-box" class="hidden">
+                <label style="color:#b71c1c; font-weight:600;">
+                    Dieses Objekt hat Prüfkarten! Zum Löschen Sicherheitscode eingeben:
+                </label>
+                <input type="text" id="delete-code-input" placeholder="Code: 6699" style="margin-top:0.5rem;">
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn-secondary" onclick="closeDeleteModal()">Abbrechen</button>
+                <button type="button" class="btn-primary btn-delete" onclick="confirmDelete()">Ja, löschen</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/js/app.js"></script>
 </body>
 </html>

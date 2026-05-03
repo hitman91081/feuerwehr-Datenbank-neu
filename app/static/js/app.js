@@ -314,11 +314,20 @@ async function openObject(id) {
     } catch (e) { alert('Fehler: ' + e.message); }
 }
 
+function getLocationPath(locationId) {
+    if (!locationId || !masterData.locations) return '';
+    const flat = flattenLocations(masterData.locations);
+    const loc = flat.find(l => l.id == locationId);
+    return loc ? loc.name : '';
+}
+
 function renderObjectDetail(obj) {
     const isStandard = currentUser.role === 'standard';
     const isFull = !isStandard;
+    const isAdmin = currentUser.role === 'admin';
 
     // Infobox
+    const locationPath = obj.location ? getLocationPath(obj.location.id) : '';
     let infoboxHtml = `
         <h3>${escapeHtml(obj.designation)}</h3>
         ${obj.title_image ? `<img src="/uploads/images/${obj.title_image}" alt="Titelbild">` : ''}
@@ -326,7 +335,7 @@ function renderObjectDetail(obj) {
             <tr><td>ID</td><td><strong>${obj.object_number}</strong></td></tr>
             <tr><td>Typ</td><td>${obj.object_type ? obj.object_type.name : '-'}</td></tr>
             <tr><td>Hersteller</td><td>${obj.manufacturer ? obj.manufacturer.name : '-'}</td></tr>
-            <tr><td>Unterbringung</td><td>${obj.location ? `<a href="#" onclick="event.preventDefault(); showObjectsByLocation(${obj.location.id}, '${escapeHtml(obj.location.name)}')">${escapeHtml(obj.location.name)}</a>` : '-'}</td></tr>
+            <tr><td>Unterbringung</td><td>${obj.location ? `<a href="#" onclick="event.preventDefault(); showObjectsByLocation(${obj.location.id}, '${escapeHtml(locationPath)}')">${escapeHtml(locationPath)}</a>` : '-'}</td></tr>
             ${isFull ? `<tr><td>Seriennummer</td><td>${escapeHtml(obj.serial_number || '-')}</td></tr>` : ''}
             ${isFull ? `<tr><td>Anschaffung</td><td>${obj.acquisition_date || '-'}</td></tr>` : ''}
             <tr><td>Status</td><td><span class="badge badge-${obj.status}">${formatStatus(obj.status)}</span></td></tr>
@@ -345,6 +354,7 @@ function renderObjectDetail(obj) {
         <div class="wiki-actions">
             <button class="btn-secondary btn-small" onclick="showView('search')">← Zurück</button>
             ${isFull ? `<button class="btn-primary btn-small" onclick="editObject(${obj.id})">✏️ Bearbeiten</button>` : ''}
+            ${isAdmin ? `<button class="btn-primary btn-small btn-delete" onclick="deleteObjectWithConfirm(${obj.id}, ${obj.inspections && obj.inspections.length > 0 ? 'true' : 'false'})">🗑️ Löschen</button>` : ''}
         </div>
     `;
 
@@ -594,6 +604,51 @@ async function showObjectsByLocation(locationId, locationName) {
     } catch (e) { alert('Fehler: ' + e.message); }
 }
 
+// === Delete Object with Security ===
+let deleteObjectId = null;
+let deleteRequiresCode = false;
+
+function deleteObjectWithConfirm(objectId, hasInspections) {
+    deleteObjectId = objectId;
+    deleteRequiresCode = hasInspections;
+    document.getElementById('delete-modal').style.display = 'block';
+    document.getElementById('delete-code-input').value = '';
+    
+    if (hasInspections) {
+        document.getElementById('delete-code-box').classList.remove('hidden');
+        document.getElementById('delete-msg').innerHTML = '<strong style="color:#b71c1c;">Achtung!</strong> Dieses Objekt hat bereits durchgeführte Prüfungen. Zum Löschen ist ein Sicherheitscode erforderlich.';
+    } else {
+        document.getElementById('delete-code-box').classList.add('hidden');
+        document.getElementById('delete-msg').textContent = 'Sind Sie sicher, dass Sie dieses Objekt löschen möchten?';
+    }
+}
+
+function closeDeleteModal() {
+    document.getElementById('delete-modal').style.display = 'none';
+    deleteObjectId = null;
+    deleteRequiresCode = false;
+}
+
+async function confirmDelete() {
+    if (!deleteObjectId) return;
+    
+    if (deleteRequiresCode) {
+        const code = document.getElementById('delete-code-input').value.trim();
+        if (code !== '6699') {
+            alert('Falscher Sicherheitscode! Löschen abgebrochen.');
+            return;
+        }
+    }
+    
+    try {
+        await api('/api/objects/' + deleteObjectId, { method: 'DELETE' });
+        closeDeleteModal();
+        alert('Objekt gelöscht!');
+        showView('search');
+        applyFilters();
+    } catch (e) { alert('Fehler beim Löschen: ' + e.message); }
+}
+
 async function editObject(id) {
     try {
         const obj = await api('/api/objects/' + id);
@@ -694,13 +749,112 @@ function editUserPrompt(id, username, fullName, email, role) {
 }
 
 async function loadMasterDataLists() {
+    // Hersteller
     const manus = await api('/api/manufacturers');
-    document.getElementById('manufacturers-list').innerHTML = manus.map(m => `
+    let manuHtml = `
+        <div style="margin-bottom:1rem;">
+            <input type="text" id="new-manufacturer-admin" placeholder="Neuer Hersteller..." style="width:250px;">
+            <button class="btn-primary btn-small" onclick="addManufacturerAdmin()">+ Hinzufügen</button>
+        </div>
+    `;
+    manuHtml += manus.map(m => `
         <span class="badge badge-reserve" style="margin:0.2rem;display:inline-block">${escapeHtml(m.name)}</span>
     `).join('') || '<p>Keine Hersteller</p>';
+    document.getElementById('manufacturers-list').innerHTML = manuHtml;
 
+    // Standorte
     const locs = await api('/api/locations');
-    document.getElementById('locations-list').innerHTML = renderLocationTree(locs);
+    // Lade auch alle Objekte für die Baumstruktur
+    const allObjects = await api('/api/objects');
+    
+    let locHtml = `
+        <div style="margin-bottom:1rem; background:#f5f5f5; padding:1rem; border-radius:8px;">
+            <h4>Neuen Standort anlegen</h4>
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                <input type="text" id="new-location-admin" placeholder="Standortname..." style="flex:2; min-width:150px;">
+                <input type="text" id="new-location-type-admin" placeholder="Typ (z.B. Fahrzeug, Raum)..." style="flex:1; min-width:120px;">
+                <select id="new-location-parent-admin" style="flex:1; min-width:150px;">
+                    <option value="">-- Kein Übergeordneter --</option>
+                </select>
+                <button class="btn-primary btn-small" onclick="addLocationAdmin()">+ Hinzufügen</button>
+            </div>
+        </div>
+    `;
+    
+    // Parent-Dropdown füllen
+    const flatLocs = flattenLocations(locs);
+    const parentSel = document.getElementById('new-location-parent-admin');
+    if (parentSel) {
+        flatLocs.forEach(l => {
+            const opt = document.createElement('option');
+            opt.value = l.id;
+            opt.textContent = l.name;
+            parentSel.appendChild(opt);
+        });
+    }
+    
+    locHtml += renderLocationTreeWithObjects(locs, allObjects);
+    document.getElementById('locations-list').innerHTML = locHtml;
+}
+
+async function addManufacturerAdmin() {
+    const name = document.getElementById('new-manufacturer-admin').value.trim();
+    if (!name) return alert('Bitte Herstellernamen eingeben');
+    try {
+        await api('/api/manufacturers', { method: 'POST', body: JSON.stringify({ name }) });
+        document.getElementById('new-manufacturer-admin').value = '';
+        loadMasterDataLists();
+        loadMasterData(); // Auch Haupt-Dropdowns aktualisieren
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+async function addLocationAdmin() {
+    const name = document.getElementById('new-location-admin').value.trim();
+    const type = document.getElementById('new-location-type-admin').value.trim() || 'Standort';
+    const parentId = document.getElementById('new-location-parent-admin').value || null;
+    if (!name) return alert('Bitte Standortnamen eingeben');
+    try {
+        await api('/api/locations', { method: 'POST', body: JSON.stringify({ name, location_type: type, parent_id: parentId ? parseInt(parentId) : null }) });
+        document.getElementById('new-location-admin').value = '';
+        document.getElementById('new-location-type-admin').value = '';
+        document.getElementById('new-location-parent-admin').value = '';
+        loadMasterDataLists();
+        loadMasterData(); // Auch Haupt-Dropdowns aktualisieren
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+function renderLocationTreeWithObjects(locs, allObjects, level = 0) {
+    if (!locs || !locs.length) return '';
+    let html = '<ul class="location-tree" style="margin-left:' + (level * 25) + 'px; list-style:none; padding-left:0;">';
+    locs.forEach(l => {
+        // Finde Objekte an diesem Standort
+        const locObjects = allObjects.filter(o => o.location_id === l.id || o.location_name === l.name);
+        let objCount = locObjects.length;
+        
+        html += `<li style="margin:0.4rem 0; padding:0.5rem; background:${level === 0 ? '#e3f2fd' : level === 1 ? '#f5f5f5' : '#fafafa'}; border-radius:6px; border-left:3px solid #1976d2;">`;
+        html += `<strong>${escapeHtml(l.name)}</strong> <span style="color:#666; font-size:0.9rem;">(${escapeHtml(l.location_type)})</span>`;
+        if (objCount > 0) {
+            html += ` <span class="badge badge-reserve" style="font-size:0.8rem;">${objCount} Objekt${objCount > 1 ? 'e' : ''}</span>`;
+        }
+        
+        // Untergeordnete Standorte
+        if (l.children && l.children.length) {
+            html += renderLocationTreeWithObjects(l.children, allObjects, level + 1);
+        }
+        
+        // Objekte direkt an diesem Standort anzeigen
+        if (locObjects.length > 0 && level >= 0) {
+            html += '<ul style="list-style:none; padding-left:15px; margin-top:0.3rem;">';
+            locObjects.forEach(o => {
+                html += `<li style="font-size:0.9rem; padding:0.2rem 0;">📦 <a href="#" onclick="event.preventDefault(); openObject(${o.id});" style="color:#1565c0;">${escapeHtml(o.designation)}</a> <small>(${o.object_number})</small></li>`;
+            });
+            html += '</ul>';
+        }
+        
+        html += '</li>';
+    });
+    html += '</ul>';
+    return html;
 }
 
 function renderLocationTree(locs, level = 0) {
@@ -1092,11 +1246,15 @@ function closeViewInspectionModal() {
 window.onclick = function(event) {
     const modal1 = document.getElementById('inspection-modal');
     const modal2 = document.getElementById('view-inspection-modal');
+    const modal3 = document.getElementById('delete-modal');
     if (event.target === modal1) {
         closeInspectionModal();
     }
     if (event.target === modal2) {
         closeViewInspectionModal();
+    }
+    if (event.target === modal3) {
+        closeDeleteModal();
     }
 };
 

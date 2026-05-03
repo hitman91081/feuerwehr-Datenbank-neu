@@ -247,5 +247,6 @@ class SearchResult(BaseModel):
     status: Optional[str] = None
     title_image: Optional[str] = None
     location_name: Optional[str] = None
+    location_id: Optional[int] = None
     class Config:
         from_attributes = True

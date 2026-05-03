@@ -347,7 +347,8 @@ def get_objects_by_location(location_id: int, db: Session = Depends(get_db), use
             object_type=obj.object_type.name if obj.object_type else None,
             status=obj.status.value if obj.status else None,
             title_image=obj.title_image,
-            location_name=obj.location.name if obj.location else None
+            location_name=obj.location.name if obj.location else None,
+            location_id=obj.location_id
         ))
     return result
 
@@ -375,7 +376,8 @@ def search_objects(q: Optional[str] = None, db: Session = Depends(get_db), user:
             object_type=obj.object_type.name if obj.object_type else None,
             status=obj.status.value if obj.status else None,
             title_image=obj.title_image,
-            location_name=obj.location.name if obj.location else None
+            location_name=obj.location.name if obj.location else None,
+            location_id=obj.location_id
         ))
     return result
 
@@ -421,7 +423,8 @@ def browse_objects(
             object_type=obj.object_type.name if obj.object_type else None,
             status=obj.status.value if obj.status else None,
             title_image=obj.title_image,
-            location_name=obj.location.name if obj.location else None
+            location_name=obj.location.name if obj.location else None,
+            location_id=obj.location_id
         ))
     return result
 
