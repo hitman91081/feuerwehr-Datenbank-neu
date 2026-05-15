@@ -1,30 +1,46 @@
+# Datenbank & Daten
+data/
+*.db
+*.db.bak
+
+# Uploads (Bilder, Dokumente, QR-Codes)
+uploads/
+
+# SSL Zertifikate
+*.pem
+key.pem
+cert.pem
+
+# Logs
+*.log
+server.log
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-env/
-venv/
-ENV/
-.venv
-pip-log.txt
-pip-delete-this-directory.txt
-*.db
-*.sqlite
-*.sqlite3
-instance/
-.DS_Store
 .env
 .env.local
+.venv/
+venv/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Office Tempfiles
+~$*
+*.tmp
+*.docx
+
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
-dist/
-build/
-*.egg-info/
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
+
+# Node (falls mal verwendet)
+node_modules/

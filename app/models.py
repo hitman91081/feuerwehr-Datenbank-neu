@@ -57,10 +57,12 @@ class Location(Base):
     name = Column(String, nullable=False)
     parent_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
     location_type = Column(String, nullable=False)  # Fahrzeug, Gerätehaus, Lager, Raum, Platz, etc.
+    linked_object_id = Column(Integer, ForeignKey("inventory_objects.id"), nullable=True)  # Verknüpfung zu Objekt (z.B. Fahrzeug)
     
     parent = relationship("Location", remote_side=[id], back_populates="children")
     children = relationship("Location", back_populates="parent")
-    objects = relationship("InventoryObject", back_populates="location")
+    objects = relationship("InventoryObject", foreign_keys="InventoryObject.location_id", back_populates="location")
+    linked_object = relationship("InventoryObject", foreign_keys=[linked_object_id], back_populates="linked_location")
 
 # --- Hauptobjekte ---
 class InventoryObject(Base):
@@ -84,8 +86,9 @@ class InventoryObject(Base):
     
     object_type = relationship("ObjectType", back_populates="objects")
     manufacturer = relationship("Manufacturer", back_populates="objects")
-    location = relationship("Location", back_populates="objects")
+    location = relationship("Location", foreign_keys=[location_id], back_populates="objects")
     created_by = relationship("User", back_populates="created_objects")
+    linked_location = relationship("Location", foreign_keys="Location.linked_object_id", back_populates="linked_object")
     images = relationship("ObjectImage", back_populates="inventory_object", cascade="all, delete-orphan")
     maintenances = relationship("Maintenance", back_populates="inventory_object", cascade="all, delete-orphan")
     repairs = relationship("Repair", back_populates="inventory_object", cascade="all, delete-orphan")
@@ -156,14 +159,15 @@ class QRCode(Base):
 # --- Prüfkarten ---
 class InspectionTemplate(Base):
     __tablename__ = "inspection_templates"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     description = Column(Text)
     fields = Column(Text, nullable=False)  # JSON: [{"label": "Visueller Zustand", "type": "checkbox", "required": true}, ...]
     object_type_id = Column(Integer, ForeignKey("object_types.id"), nullable=True)
+    allow_standard_users = Column(Boolean, default=False)  # Für Standardnutzer sichtbar?
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     object_type = relationship("ObjectType", back_populates="inspection_templates")
     inspections = relationship("Inspection", back_populates="template")
 
@@ -182,6 +186,57 @@ class Inspection(Base):
     inventory_object = relationship("InventoryObject", back_populates="inspections")
     template = relationship("InspectionTemplate", back_populates="inspections")
     inspected_by = relationship("User", back_populates="inspections")
+
+# --- Meldungen / Dashboard ---
+class MessageType(str, enum.Enum):
+    BESCHAEDIGUNG = "beschaedigung"
+    AUFFAELLIGKEIT = "auffaelligkeit"
+    DEFEKT = "defekt"
+    INFO = "info"
+    NOTIZ = "notiz"
+    SONSTIGES = "sonstiges"
+
+class MessageAction(str, enum.Enum):
+    AUSSER_BETRIEB = "ausser_betrieb"
+    AUF_FAHRZEUG = "auf_fahrzeug"
+    ENTSORGT = "entsorgt"
+    SONSTIGES = "sonstiges"
+
+class MessagePriority(str, enum.Enum):
+    HOCH = "hoch"
+    MITTEL = "mittel"
+    NIEDRIG = "niedrig"
+
+class MessageStatus(str, enum.Enum):
+    OFFEN = "offen"
+    IN_BEARBEITUNG = "in_bearbeitung"
+    IN_KLAERUNG = "in_klaerung"
+    ZUR_REPARATUR = "zur_reparatur"
+    BEDIENUNGSFEHLER = "bedienungsfehler"
+    NICHT_MEHR_AUFGETRETEN = "nicht_mehr_aufgetreten"
+    GEPRUEFT_OK = "geprueft_ok"
+    ENTSORGT = "entsorgt"
+    ABGESCHLOSSEN = "abgeschlossen"
+    GELOESCHT = "geloescht"
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_type = Column(Enum(MessageType), nullable=False)
+    subject = Column(String, nullable=False)
+    device_name = Column(String)
+    device_id = Column(String)
+    description = Column(Text)
+    action = Column(Enum(MessageAction), default=MessageAction.SONSTIGES)
+    priority = Column(Enum(MessagePriority), default=MessagePriority.MITTEL)
+    status = Column(Enum(MessageStatus), default=MessageStatus.OFFEN)
+    is_closed = Column(Boolean, default=False)  # Separates "Abgeschlossen"-Flag
+    reported_by_name = Column(String)  # Name des eigentlichen Meldenden (z.B. bei Standard-Login)
+    created_by_name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by_name = Column(String)
 
 # Beziehungen zu bestehenden Modellen ergänzen
 ObjectType.inspection_templates = relationship("InspectionTemplate", back_populates="object_type")

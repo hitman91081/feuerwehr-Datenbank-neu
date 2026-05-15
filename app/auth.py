@@ -80,3 +80,18 @@ def create_default_admin(db: Session):
         db.add(admin_user)
         db.commit()
         print("✅ Default-Admin erstellt: admin / admin")
+
+def create_default_standard_user(db: Session):
+    standard = db.query(User).filter(User.username == "standard").first()
+    if not standard:
+        standard_user = User(
+            username="standard",
+            full_name="Standardnutzer",
+            email="standard@feuerwehr.local",
+            hashed_password=get_password_hash("standard"),
+            role=UserRole.STANDARD,
+            is_active=True
+        )
+        db.add(standard_user)
+        db.commit()
+        print("✅ Default-Standardnutzer erstellt: standard / standard")

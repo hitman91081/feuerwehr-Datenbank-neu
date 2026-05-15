@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Feuerwehr Inventar</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v=2">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
 </head>
 <body>
@@ -44,7 +44,7 @@
         <main id="main-content">
             <!-- Dashboard -->
             <div id="view-dashboard" class="view">
-                <h2>Willkommen</h2>
+                <h2>Dashboard</h2>
                 <div class="dashboard-grid">
                     <div class="dash-card" onclick="showView('search')">
                         <div class="dash-icon">🔍</div>
@@ -61,8 +61,18 @@
                         <h3>QR-Code scannen</h3>
                         <p>Direkt zum Objekt</p>
                     </div>
+                    <div class="dash-card" onclick="openMessageModal()">
+                        <div class="dash-icon">📝</div>
+                        <h3>Meldung anlegen</h3>
+                        <p>Mangel, Defekt oder Info melden</p>
+                    </div>
                 </div>
-                <div id="maintenance-alerts" class="alerts"></div>
+
+                <!-- Meldungen / Messages -->
+                <div id="dashboard-messages" style="margin-top:1.5rem;">
+                    <h3>📋 Aktuelle Meldungen</h3>
+                    <div id="messages-list"></div>
+                </div>
             </div>
 
             <!-- Search -->
@@ -184,9 +194,8 @@
                             </select>
                         </div>
                         <div id="vehicle-location-box" class="hidden">
-                            <label>
-                                <input type="checkbox" id="obj-vehicle-as-location">
-                                Auch als Standort anlegen (z.B. für Geräte auf diesem Fahrzeug)
+                            <label style="color:#1976d2; font-weight:500;">
+                                🚒 Fahrzeuge werden automatisch als Standort angelegt (z.B. für Geräte auf dem Fahrzeug)
                             </label>
                         </div>
                         <div>
@@ -194,7 +203,7 @@
                             <input type="date" id="obj-acquisition">
                         </div>
                         <div>
-                            <label>Wartungsintervall (Tage)</label>
+                            <label>Prüfintervall (Tage)</label>
                             <input type="number" id="obj-maint-days" min="1">
                         </div>
                     </div>
@@ -207,7 +216,7 @@
                         <textarea id="obj-hints" rows="3"></textarea>
                     </div>
                     <div>
-                        <label>Wartungsnotizen</label>
+                        <label>Prüfnotizen / Hinweise</label>
                         <textarea id="obj-maint-notes" rows="2"></textarea>
                     </div>
                     <div>
@@ -233,6 +242,10 @@
                     <button class="admin-tab active" onclick="showAdminTab('users')">Benutzer</button>
                     <button class="admin-tab" onclick="showAdminTab('masterdata')">Stammdaten</button>
                     <button class="admin-tab" onclick="showAdminTab('inspections')">Prüfkarten</button>
+                    <button class="admin-tab" onclick="showAdminTab('qrlogin')">QR-Login</button>
+                    <button class="admin-tab" onclick="showAdminTab('importexport')">Import/Export</button>
+                    <button class="admin-tab" onclick="showAdminTab('log')">Meldungs-Log</button>
+                    <button class="admin-tab" onclick="showAdminTab('archive')">Prüfarchiv</button>
                 </div>
                 <div id="admin-users" class="admin-panel">
                     <button class="btn-primary" onclick="showUserForm()">+ Benutzer</button>
@@ -260,10 +273,16 @@
                                     <label>Zugeordnete Kategorie</label>
                                     <select id="tmpl-type"><option value="">-- Alle Kategorien --</option></select>
                                 </div>
+                                <div style="grid-column: 1 / -1;">
+                                    <label>Beschreibung</label>
+                                    <textarea id="tmpl-desc" rows="2" placeholder="z.B. Prüfung nach DIN 14406"></textarea>
+                                </div>
                             </div>
-                            <div>
-                                <label>Beschreibung</label>
-                                <textarea id="tmpl-desc" rows="2" placeholder="z.B. Prüfung nach DIN 14406"></textarea>
+                            <div style="padding:0.5rem 0;">
+                                <label for="tmpl-allow-standard" style="display:inline-flex !important; align-items:center; gap:0.4rem; font-weight:500; color:#1976d2; cursor:pointer; margin:0 !important; padding:0 !important;">
+                                    <input type="checkbox" id="tmpl-allow-standard" style="margin:0; cursor:pointer;">
+                                    Für Standardnutzer sichtbar (z.B. tägliche Fahrzeugprüfung)
+                                </label>
                             </div>
                             <h4>Prüffelder</h4>
                             <div id="tmpl-fields-list"></div>
@@ -273,6 +292,97 @@
                                 <button type="submit" class="btn-primary">Prüfkarte speichern</button>
                             </div>
                         </form>
+                    </div>
+                </div>
+                <div id="admin-qrlogin" class="admin-panel hidden">
+                    <h3>Schneller Standardnutzer-Login</h3>
+                    <p style="color:#666; margin-bottom:1rem;">Diesen QR-Code im Gerätehaus ausdrucken. Standardnutzer können sich per Scan sofort anmelden (nur Lesezugriff + freigegebene Prüfkarten).</p>
+                    <div style="display:flex; gap:2rem; flex-wrap:wrap; align-items:flex-start;">
+                        <div style="text-align:center; flex-shrink:0;">
+                            <img src="/api/auth/qr-login-code" alt="QR-Login" style="width:200px; height:200px; border:2px solid #ddd; border-radius:8px; padding:8px; background:white;">
+                            <br>
+                            <small style="color:#666;">QR-Code für Standard-Login</small>
+                        </div>
+                        <div style="flex:1; min-width:250px; max-width:500px;">
+                            <div style="background:#e3f2fd; padding:1rem; border-radius:8px; margin-bottom:1rem;">
+                                <h4 style="margin-top:0;">🖨️ Aufkleber drucken</h4>
+                                <p style="font-size:0.9rem; margin-bottom:0.75rem;">Format: 50 x 50 mm<br>Mit Beschriftung und Anleitung</p>
+                                <a href="/api/auth/qr-login-sticker" target="_blank" class="btn-primary" style="margin-top:0.5rem; display:inline-block;">Aufkleber drucken</a>
+                            </div>
+                            <div style="background:#fff8e1; padding:1rem; border-radius:8px;">
+                                <h4 style="margin-top:0;">ℹ️ Hinweis</h4>
+                                <p style="font-size:0.85rem; margin:0;">
+                                    Der QR-Code führt zu:<br>
+                                    <code style="background:#f5f5f5; padding:2px 6px; border-radius:4px;">/?qrlogin=1</code><br><br>
+                                    Nach dem Scannen wird automatisch der Standardnutzer eingeloggt. Passwort erforderlich.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="admin-importexport" class="admin-panel hidden">
+                    <h3>Datenbank Export</h3>
+                    <p style="color:#666; margin-bottom:1rem;">Alle Objekte als CSV-Datei herunterladen für Sicherungszwecke.</p>
+                    <button class="btn-primary" onclick="exportCSV()">📥 CSV Export herunterladen</button>
+
+                    <h3 style="margin-top:2rem;">Datenbank Import</h3>
+                    <p style="color:#666; margin-bottom:1rem;">Neue Objekte aus einer CSV-Datei importieren. Bestehende Objekte werden nicht überschrieben.</p>
+                    <div style="background:#fff8e1; padding:1rem; border-radius:8px; margin-bottom:1rem;">
+                        <h4 style="margin-top:0;">📋 CSV-Format</h4>
+                        <p style="font-size:0.85rem; margin:0;">
+                            Die CSV-Datei muss als Trennzeichen <strong>Semikolon (;)</strong> verwenden.<br>
+                            Die erste Zeile ist der Header und wird übersprungen.<br><br>
+                            <strong>Spalten:</strong> Bezeichnung; Typ; Seriennummer; Hersteller; Standort; Infotext; Hinweise; Anschaffungsdatum; Status; Prüfintervall_Tage; Prüfnotizen<br><br>
+                            <strong>Standort:</strong> Untergeordnete Standorte mit <code>&gt;</code> trennen (z.B. <code>Gerätehaus &gt; Halle 1</code>). Wenn leer, wird automatisch <code>Gerätehaus</code> verwendet.<br><br>
+                            <strong>Beispiel:</strong><br>
+                            <code style="background:#f5f5f5; padding:2px 6px; border-radius:4px; font-size:0.8rem;">
+                                C-Schlauch 20m;Schläuche, Armaturen und Zubehör;S-12345;Schlauchheinz;Gerätehaus;;;2024-04-05;in_benutzung;180;Halbjährliche Prüfung
+                            </code>
+                        </p>
+                    </div>
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <input type="file" id="import-csv-file" accept=".csv">
+                        <button class="btn-primary" onclick="importCSV()">📤 Importieren</button>
+                    </div>
+                    <div id="import-result" style="margin-top:1rem;"></div>
+
+                    <h3 style="margin-top:2rem;">💾 Vollständige Sicherung & Wiederherstellung</h3>
+                    <div style="background:#e3f2fd; padding:1rem; border-radius:8px; margin-bottom:1rem;">
+                        <p style="font-size:0.85rem; margin:0;">
+                            Ein <strong>vollständiges Backup</strong> enthält die komplette SQLite-Datenbank <strong>und</strong> alle Bilder, Dokumente und QR-Codes.<br>
+                            Beim Wiederherstellen werden alle aktuellen Daten komplett ersetzt. Die vorherige Version wird automatisch als <code>.bak</code> gesichert.
+                        </p>
+                    </div>
+                    <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:center; margin-bottom:1rem;">
+                        <button class="btn-primary" onclick="downloadFullBackup()">📥 Vollständiges Backup herunterladen</button>
+                        <div style="display:flex; gap:0.5rem; align-items:center;">
+                            <input type="file" id="backup-upload" accept=".zip" style="display:none;" onchange="uploadFullBackup(this)">
+                            <button class="btn-secondary" onclick="document.getElementById('backup-upload').click()">📤 Backup hochladen & wiederherstellen</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="admin-log" class="admin-panel hidden">
+                    <h3>📋 Meldungs-Log</h3>
+                    <p style="color:#666; margin-bottom:1rem;">Alle Meldungen und Aktivitäten als CSV-Logdatei herunterladen.</p>
+                    <button class="btn-primary" onclick="exportMessagesLog()">📥 Meldungs-Log herunterladen</button>
+                </div>
+                <div id="admin-archive" class="admin-panel hidden">
+                    <h3>Prüfarchiv Download</h3>
+                    <p style="color:#666; margin-bottom:1rem;">Rechtlich relevante Prüfungen als Archiv herunterladen.</p>
+                    <div style="display:flex; gap:1rem; align-items:flex-end; flex-wrap:wrap; margin-bottom:1.5rem;">
+                        <div>
+                            <label>Jahr</label>
+                            <select id="archive-year"></select>
+                        </div>
+                        <button class="btn-primary" onclick="exportArchive()">📊 CSV-Archiv herunterladen</button>
+                        <button class="btn-primary" onclick="exportArchivePDF()" style="background:#d32f2f;">📄 PDF-Archiv herunterladen</button>
+                    </div>
+                    <div style="background:#fff8e1; padding:1rem; border-radius:8px;">
+                        <h4 style="margin-top:0;">ℹ️ Info</h4>
+                        <p style="font-size:0.85rem; margin:0;">
+                            <strong>CSV-Archiv:</strong> Alle Prüfungen als Tabelle (Excel-kompatibel)<br>
+                            <strong>PDF-Archiv:</strong> Jede Prüfung als einzelne PDF-Datei im ZIP-Ordner
+                        </p>
                     </div>
                 </div>
             </div>
@@ -298,12 +408,82 @@
                 <label style="color:#b71c1c; font-weight:600;">
                     Dieses Objekt hat Prüfkarten! Zum Löschen Sicherheitscode eingeben:
                 </label>
-                <input type="text" id="delete-code-input" placeholder="Code: 6699" style="margin-top:0.5rem;">
+                <input type="text" id="delete-code-input" placeholder="Sicherheitscode eingeben" style="margin-top:0.5rem;">
             </div>
             <div class="form-actions">
                 <button type="button" class="btn-secondary" onclick="closeDeleteModal()">Abbrechen</button>
                 <button type="button" class="btn-primary btn-delete" onclick="confirmDelete()">Ja, löschen</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Message Modal -->
+    <div id="message-modal" class="modal">
+        <div class="modal-content" style="max-width:600px;">
+            <span class="close" onclick="closeMessageModal()">&times;</span>
+            <h2>📝 Neue Meldung</h2>
+            <form id="message-form" onsubmit="saveMessage(event)">
+                <div class="form-grid">
+                    <div>
+                        <label>Typ *</label>
+                        <select id="msg-type" required>
+                            <option value="beschaedigung">Beschädigung</option>
+                            <option value="auffaelligkeit">Auffälligkeit</option>
+                            <option value="defekt">Defekt</option>
+                            <option value="info">Info</option>
+                            <option value="notiz">Notiz</option>
+                            <option value="sonstiges">Sonstiges</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Priorität</label>
+                        <select id="msg-priority">
+                            <option value="hoch">🔴 Hoch</option>
+                            <option value="mittel" selected>🟡 Mittel</option>
+                            <option value="niedrig">🟢 Niedrig</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label>Thema *</label>
+                    <input type="text" id="msg-subject" required placeholder="z.B. Riss im Schlauch">
+                </div>
+                <div class="form-grid">
+                    <div>
+                        <label>Gerätename (optional)</label>
+                        <input type="text" id="msg-device-name" placeholder="z.B. C-Schlauch 20m">
+                    </div>
+                    <div>
+                        <label>Geräte-ID (optional)</label>
+                        <div style="display:flex; gap:0.3rem;">
+                            <input type="text" id="msg-device-id" placeholder="z.B. FFW-00001" style="flex:1;">
+                            <button type="button" class="btn-secondary btn-small" onclick="scanQrForMessage()">📷 QR</button>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <label>Name des Meldenden (optional)</label>
+                    <input type="text" id="msg-reported-by" placeholder="Dein Name">
+                </div>
+                <div>
+                    <label>Beschreibung</label>
+                    <textarea id="msg-description" rows="3" placeholder="Details zur Meldung..."></textarea>
+                </div>
+                <div>
+                    <label>Maßnahme</label>
+                    <select id="msg-action">
+                        <option value="sonstiges">-- Auswählen --</option>
+                        <option value="ausser_betrieb">Gerät außer Betrieb</option>
+                        <option value="auf_fahrzeug">Aktuell auf Fahrzeug verladen</option>
+                        <option value="entsorgt">Entsorgt</option>
+                        <option value="sonstiges">Sonstiges</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeMessageModal()">Abbrechen</button>
+                    <button type="submit" class="btn-primary">Meldung speichern</button>
+                </div>
+            </form>
         </div>
     </div>
 

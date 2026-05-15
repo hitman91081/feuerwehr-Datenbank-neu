@@ -3,6 +3,7 @@ let token = localStorage.getItem('token') || '';
 let currentUser = null;
 let masterData = { types: [], manufacturers: [], locations: [] };
 let scanner = null;
+let currentView = 'dashboard';
 
 // === API Helper ===
 async function api(url, opts = {}) {
@@ -44,6 +45,17 @@ async function handleLogin(e) {
     }
 }
 
+async function handleQrLogin() {
+    try {
+        const data = await api('/api/auth/qr-login', { method: 'POST' });
+        token = data.access_token;
+        localStorage.setItem('token', token);
+        await initApp();
+    } catch (err) {
+        alert('QR-Login fehlgeschlagen: ' + err.message);
+    }
+}
+
 async function initApp() {
     try {
         currentUser = await api('/api/auth/me');
@@ -69,6 +81,8 @@ async function initApp() {
     await loadMasterData();
     showView('dashboard');
     loadDashboardAlerts();
+    loadDashboardMessages();
+    startDashboardAutoRefresh();
 }
 
 function logout() {
@@ -79,11 +93,36 @@ function logout() {
 }
 
 // === Views ===
+let dashboardRefreshInterval = null;
+
 function showView(name) {
+    currentView = name;
     document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
     document.getElementById('view-' + name).classList.remove('hidden');
     document.getElementById('mobile-menu').classList.add('hidden');
     window.scrollTo(0, 0);
+    // Auto-load all objects when switching to search view
+    if (name === 'search') {
+        applyFilters();
+    }
+    if (name === 'admin') {
+        loadUsers();
+    }
+    // Dashboard-Meldungen aktualisieren, wenn wir zurück zum Dashboard wechseln
+    if (name === 'dashboard') {
+        loadDashboardMessages();
+        loadDashboardAlerts();
+    }
+}
+
+function startDashboardAutoRefresh() {
+    if (dashboardRefreshInterval) return;
+    dashboardRefreshInterval = setInterval(() => {
+        if (currentView === 'dashboard') {
+            loadDashboardMessages();
+            loadDashboardAlerts();
+        }
+    }, 30000); // Alle 30 Sekunden aktualisieren
 }
 
 function toggleMenu() {
@@ -119,7 +158,6 @@ async function loadMasterData() {
                 box.classList.remove('hidden');
             } else {
                 box.classList.add('hidden');
-                document.getElementById('obj-vehicle-as-location').checked = false;
             }
         };
     }
@@ -212,6 +250,7 @@ async function saveNewManufacturer() {
         const m = await api('/api/manufacturers', { method: 'POST', body: JSON.stringify({ name }) });
         masterData.manufacturers.push(m);
         fillSelect('obj-manufacturer', masterData.manufacturers, 'name');
+        fillFilterSelect('filter-manufacturer', masterData.manufacturers, 'name');
         document.getElementById('obj-manufacturer').value = m.id;
         document.getElementById('new-manufacturer').value = '';
         document.getElementById('add-manufacturer-box').classList.add('hidden');
@@ -238,9 +277,11 @@ async function saveNewLocation() {
         masterData.locationsFlat = allLocations;
         masterData.locations = buildLocationTree(allLocations);
         
-        // Dropdowns aktualisieren
-        fillSelect('obj-location', allLocations.map(l => ({ id: l.id, name: getLocationPath(allLocations, l.id) })), 'name');
-        fillSelect('new-location-parent', allLocations.map(l => ({ id: l.id, name: getLocationPath(allLocations, l.id) })), 'name');
+        // Dropdowns aktualisieren (Objekt-Formular + Filter + Admin)
+        const locationOptions = allLocations.map(l => ({ id: l.id, name: getLocationPath(allLocations, l.id) }));
+        fillSelect('obj-location', locationOptions, 'name');
+        fillSelect('new-location-parent', locationOptions, 'name');
+        fillFilterSelect('filter-location', locationOptions, 'name');
         
         document.getElementById('obj-location').value = loc.id;
         document.getElementById('new-location').value = '';
@@ -290,7 +331,7 @@ function resetFilters() {
     document.getElementById('filter-location').value = '';
     document.getElementById('filter-manufacturer').value = '';
     document.getElementById('filter-status').value = '';
-    document.getElementById('search-results').innerHTML = '';
+    applyFilters();
 }
 
 function renderSearchResults(results) {
@@ -313,7 +354,19 @@ function renderSearchResults(results) {
 }
 
 // === QR Scanner ===
-function startQrScan() {
+let qrScanCallback = null;
+let previousViewBeforeScan = null;
+let modalToRestoreAfterScan = null;
+
+function startQrScan(onScanCallback, modalId) {
+    previousViewBeforeScan = currentView;
+    qrScanCallback = onScanCallback || null;
+    modalToRestoreAfterScan = modalId || null;
+    // Wenn ein Modal offen ist, ausblenden damit der Scanner sichtbar ist
+    if (modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) modal.style.display = 'none';
+    }
     showView('scanner');
     if (!window.Html5Qrcode) {
         alert('QR-Scanner wird geladen... bitte Seite neu laden.');
@@ -324,8 +377,13 @@ function startQrScan() {
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 250, height: 250 } },
         (decodedText) => {
+            const cb = qrScanCallback;
             stopQrScan();
-            handleQrResult(decodedText);
+            if (cb) {
+                cb(decodedText);
+            } else {
+                handleQrResult(decodedText);
+            }
         },
         () => {}
     ).catch(err => alert('Kamera-Fehler: ' + err));
@@ -333,7 +391,18 @@ function startQrScan() {
 
 function stopQrScan() {
     if (scanner) { scanner.stop().catch(() => {}); scanner = null; }
-    showView('search');
+    if (previousViewBeforeScan) {
+        showView(previousViewBeforeScan);
+    } else {
+        showView('search');
+    }
+    // Modal wiederherstellen falls es vorher ausgeblendet wurde
+    if (modalToRestoreAfterScan) {
+        const modal = document.getElementById(modalToRestoreAfterScan);
+        if (modal) modal.style.display = 'block';
+        modalToRestoreAfterScan = null;
+    }
+    qrScanCallback = null;
 }
 
 function handleQrResult(text) {
@@ -378,7 +447,7 @@ function renderObjectDetail(obj) {
         ${obj.qr_code ? `<div style="text-align:center;margin-top:1rem;"><img src="/uploads/qrcodes/${obj.qr_code.filename}" style="width:120px;"><br><small>${obj.object_number}</small></div>` : ''}
         ${isFull ? `
             <div style="margin-top:1rem;text-align:center;">
-                <a href="/api/objects/${obj.id}/sticker/print" target="_blank" class="btn-primary btn-small">🖨️ Aufkleber</a>
+                <a href="/api/objects/${obj.id}/sticker/print?t=${Date.now()}" target="_blank" class="btn-primary btn-small">🖨️ Aufkleber</a>
             </div>
         ` : ''}
     `;
@@ -427,20 +496,33 @@ function renderObjectDetail(obj) {
             contentHtml += `</div>`;
         }
 
+        // Nächste Prüfung (aus Prüfkarten / Inspections)
+        let nextInspection = null;
+        if (obj.inspections && obj.inspections.length) {
+            // Finde die Prüfung mit dem nächsten Prüfdatum in der Zukunft
+            const upcoming = obj.inspections
+                .filter(i => i.next_inspection_date)
+                .sort((a, b) => new Date(a.next_inspection_date) - new Date(b.next_inspection_date));
+            if (upcoming.length) nextInspection = upcoming[0];
+        }
+        // Fallback: Wartungsdaten (altes System)
+        let maintInfo = null;
         if (obj.maintenances && obj.maintenances.length) {
-            contentHtml += `<h2>Wartung</h2>`;
-            obj.maintenances.forEach(m => {
-                const daysLeft = m.next_maintenance_date ? daysUntil(m.next_maintenance_date) : null;
-                contentHtml += `
-                    <div class="alert ${daysLeft !== null && daysLeft < 0 ? 'alert-danger' : ''}">
-                        <strong>Intervall:</strong> ${m.interval_days} Tage<br>
-                        <strong>Letzte Wartung:</strong> ${m.last_maintenance_date || '-'}<br>
-                        <strong>Nächste Wartung:</strong> ${m.next_maintenance_date || '-'}
-                        ${daysLeft !== null ? `<br><strong>Restzeit:</strong> ${daysLeft < 0 ? 'Überfällig!' : daysLeft + ' Tage'}` : ''}
-                        ${m.notes ? '<br>' + escapeHtml(m.notes) : ''}
-                    </div>
-                `;
-            });
+            maintInfo = obj.maintenances[0];
+        }
+        const nextDate = nextInspection ? nextInspection.next_inspection_date : (maintInfo ? maintInfo.next_maintenance_date : null);
+        const daysLeft = nextDate ? daysUntil(nextDate) : null;
+        if (nextDate || (maintInfo && maintInfo.interval_days)) {
+            contentHtml += `<h2>📝 Nächste Prüfung</h2>`;
+            contentHtml += `
+                <div class="alert ${daysLeft !== null && daysLeft < 0 ? 'alert-danger' : (daysLeft !== null && daysLeft <= 7 ? 'alert-warning' : '')}">
+                    <strong>Nächster Termin:</strong> ${nextDate || '-'}<br>
+                    ${daysLeft !== null ? `<strong>Restzeit:</strong> ${daysLeft < 0 ? 'Überfällig!' : daysLeft + ' Tage'}<br>` : ''}
+                    ${nextInspection ? `<strong>Letzte Prüfung:</strong> ${nextInspection.template_name} am ${new Date(nextInspection.inspected_at).toLocaleDateString('de-DE')}<br>` : ''}
+                    ${maintInfo ? `<strong>Intervall:</strong> ${maintInfo.interval_days} Tage<br>` : ''}
+                    ${maintInfo && maintInfo.notes ? '<small>' + escapeHtml(maintInfo.notes) + '</small>' : ''}
+                </div>
+            `;
         }
 
         if (obj.repairs && obj.repairs.length) {
@@ -450,43 +532,51 @@ function renderObjectDetail(obj) {
             `).join('');
             contentHtml += `</tbody></table>`;
         }
+    }
 
-        // Prüfungen
-        contentHtml += `<h2>Prüfungen</h2>`;
-        if (isFull) {
-            contentHtml += `<button class="btn-primary btn-small" onclick="openInspectionModal(${obj.id})">+ Neue Prüfung</button>`;
-        }
-        if (obj.inspections && obj.inspections.length) {
-            contentHtml += `<div style="margin-top:0.5rem;">`;
-            obj.inspections.forEach(i => {
-                const results = JSON.parse(i.results || '{}');
-                // Kurze Zusammenfassung: Anzahl OK / Nicht OK
-                let okCount = 0, failCount = 0;
-                Object.entries(results).forEach(([k, v]) => {
-                    if (v === true) okCount++;
-                    else if (v === false) failCount++;
-                });
-                const statusBadge = failCount > 0 
-                    ? `<span class="badge badge-in_reparatur">${failCount} Mängel</span>` 
-                    : `<span class="badge badge-in_benutzung">OK</span>`;
-                
-                contentHtml += `
-                    <div class="alert" style="margin-bottom:0.5rem;">
-                        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.5rem;">
-                            <div>
-                                <strong>${i.template_name || 'Prüfung'}</strong> ${statusBadge}<br>
-                                <small>📅 ${new Date(i.inspected_at).toLocaleDateString('de-DE')} | 👤 ${i.inspected_by_name || '-'}</small>
-                            </div>
+    // Prüfungen (für alle Rollen sichtbar, aber gefiltert)
+    contentHtml += `<h2>Prüfungen</h2>`;
+    contentHtml += `<button class="btn-primary btn-small" onclick="openInspectionModal(${obj.id})">+ Neue Prüfung</button>`;
+    if (obj.inspections && obj.inspections.length) {
+        contentHtml += `<div style="margin-top:0.5rem;">`;
+        obj.inspections.forEach(i => {
+            const results = JSON.parse(i.results || '{}');
+            // Kurze Zusammenfassung: Anzahl OK / Nicht OK
+            let okCount = 0, failCount = 0;
+            Object.entries(results).forEach(([k, v]) => {
+                if (v === true) okCount++;
+                else if (v === false) failCount++;
+            });
+            const statusBadge = failCount > 0
+                ? `<span class="badge badge-in_reparatur">${failCount} Mängel</span>`
+                : `<span class="badge badge-in_benutzung">OK</span>`;
+
+            // Prüfe ob Prüfung noch innerhalb von 2 Stunden bearbeitbar ist
+            // WICHTIG: 'Z' anhängen damit JavaScript es als UTC interpretiert (Server speichert UTC)
+            const inspectedDate = new Date(i.inspected_at + 'Z');
+            const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+            const canEdit = inspectedDate > twoHoursAgo;
+
+            contentHtml += `
+                <div class="alert" style="margin-bottom:0.5rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.5rem;">
+                        <div>
+                            <strong>${i.template_name || 'Prüfung'}</strong> ${statusBadge}<br>
+                            <small>📅 ${new Date(i.inspected_at).toLocaleDateString('de-DE')} | 👤 ${i.inspected_by_name || '-'}</small>
+                        </div>
+                        <div style="display:flex; gap:0.3rem;">
+                            ${canEdit ? `<button class="btn-primary btn-small" onclick="editInspection(${i.id})">✏️ Bearbeiten</button>` : ''}
                             <button class="btn-primary btn-small" onclick="viewInspection(${i.id}, '${escapeHtml(i.template_name || 'Prüfung')}', '${i.inspected_at}', '${i.inspected_by_name || '-'}')">👁️ Ansehen</button>
                         </div>
-                        ${i.next_inspection_date ? `<small style="display:block; margin-top:0.3rem;">Nächste Prüfung: ${i.next_inspection_date}</small>` : ''}
                     </div>
-                `;
-            });
-            contentHtml += `</div>`;
-        } else {
-            contentHtml += `<p>Keine Prüfungen vorhanden.</p>`;
-        }
+                    ${i.next_inspection_date ? `<small style="display:block; margin-top:0.3rem;">Nächste Prüfung: ${i.next_inspection_date}</small>` : ''}
+                    ${canEdit ? '<small style="color:#1976d2;">✎ Noch bearbeitbar (innerhalb 2h)</small>' : ''}
+                </div>
+            `;
+        });
+        contentHtml += `</div>`;
+    } else {
+        contentHtml += `<p>Keine Prüfungen vorhanden.</p>`;
     }
 
     document.getElementById('detail-content').innerHTML = contentHtml;
@@ -581,18 +671,8 @@ async function saveObject(e) {
             }
         }
 
-        // Fahrzeug auch als Standort anlegen?
-        const vehicleAsLoc = document.getElementById('obj-vehicle-as-location').checked;
-        const selectedType = masterData.types.find(t => t.id == data.object_type_id);
-        if (!id && vehicleAsLoc && selectedType && selectedType.name === 'Fahrzeug') {
-            try {
-                await api('/api/locations', {
-                    method: 'POST',
-                    body: JSON.stringify({ name: obj.designation, location_type: 'Fahrzeug', parent_id: data.location_id || null })
-                });
-                masterData.locations = await api('/api/locations');
-            } catch (e) { console.warn('Standort konnte nicht angelegt werden:', e); }
-        }
+        // Fahrzeuge werden automatisch im Backend als Standort angelegt
+        // (keine manuelle Aktion mehr nötig)
 
         alert('Gespeichert!');
         // Formular zurücksetzen
@@ -602,7 +682,6 @@ async function saveObject(e) {
         document.getElementById('new-location').value = '';
         document.getElementById('new-location-type').value = '';
         document.getElementById('vehicle-location-box').classList.add('hidden');
-        document.getElementById('obj-vehicle-as-location').checked = false;
         document.getElementById('add-manufacturer-box').classList.add('hidden');
         document.getElementById('add-location-box').classList.add('hidden');
 
@@ -704,7 +783,6 @@ async function editObject(id) {
         document.getElementById('new-location-type').value = '';
         document.getElementById('add-manufacturer-box').classList.add('hidden');
         document.getElementById('add-location-box').classList.add('hidden');
-        document.getElementById('obj-vehicle-as-location').checked = false;
         // Trigger type change to show/hide vehicle-location-box
         const typeSel = document.getElementById('obj-type');
         if (typeSel && typeSel.onchange) typeSel.onchange();
@@ -729,9 +807,14 @@ function showAdminTab(tab) {
     document.getElementById('admin-users').classList.toggle('hidden', tab !== 'users');
     document.getElementById('admin-masterdata').classList.toggle('hidden', tab !== 'masterdata');
     document.getElementById('admin-inspections').classList.toggle('hidden', tab !== 'inspections');
+    document.getElementById('admin-qrlogin').classList.toggle('hidden', tab !== 'qrlogin');
+    document.getElementById('admin-importexport').classList.toggle('hidden', tab !== 'importexport');
+    document.getElementById('admin-log').classList.toggle('hidden', tab !== 'log');
+    document.getElementById('admin-archive').classList.toggle('hidden', tab !== 'archive');
     if (tab === 'users') loadUsers();
     if (tab === 'masterdata') loadMasterDataLists();
     if (tab === 'inspections') loadInspectionTemplatesList();
+    if (tab === 'archive') initArchiveYears();
 }
 
 async function loadUsers() {
@@ -879,27 +962,35 @@ function renderLocationTreeWithObjects(locs, allObjects, level = 0) {
     
     let html = '<ul style="list-style:none; padding-left:0; margin:0;">';
     locs.forEach(l => {
-        const locObjects = allObjects.filter(o => o.location_id === l.id);
+        // Filtere Objekte: Keine Fahrzeuge anzeigen (die haben ihren eigenen verknüpften Standort)
+        const locObjects = allObjects.filter(o => o.location_id === l.id && o.object_type !== 'Fahrzeug');
         const objCount = locObjects.length;
         const hasChildren = l.children && l.children.length > 0;
+        const isLinkedVehicle = l.linked_object_id || l.location_type === 'Fahrzeug';
         
         html += `<li style="margin:0.3rem 0; padding-left:${indent}px;">`;
         html += `<div style="padding:0.5rem; background:${colors[level % colors.length]}; border-radius:6px; border-left:3px solid ${borderColors[level % borderColors.length]};">`;
         
         // Header mit Icon, Name und Löschen-Button
         html += `<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.3rem;">`;
-        html += `<div>${hasChildren ? '📁' : '📂'} <strong>${escapeHtml(l.name)}</strong> <span style="color:#666; font-size:0.85rem;">(${escapeHtml(l.location_type)})</span></div>`;
+        html += `<div>`;
+        if (isLinkedVehicle && l.linked_object_id) {
+            html += `🚒 <strong><a href="#" onclick="event.preventDefault(); openObject(${l.linked_object_id});" style="color:#1565c0; text-decoration:none;">${escapeHtml(l.name)}</a></strong>`;
+        } else {
+            html += `${hasChildren ? '📁' : '📂'} <strong>${escapeHtml(l.name)}</strong>`;
+        }
+        html += ` <span style="color:#666; font-size:0.85rem;">(${escapeHtml(l.location_type)})</span></div>`;
         html += `<div style="display:flex; gap:0.3rem; align-items:center;">`;
         if (objCount > 0) {
             html += `<span class="badge badge-reserve" style="font-size:0.75rem;">${objCount} Objekt${objCount > 1 ? 'e' : ''}</span>`;
         }
         // Löschen-Button nur für Admin und nur wenn keine Kinder und keine Objekte
-        if (isAdmin && !hasChildren && objCount === 0) {
+        if (isAdmin && !hasChildren && objCount === 0 && !isLinkedVehicle) {
             html += `<button class="btn-primary btn-small btn-delete" onclick="deleteLocation(${l.id}, '${escapeHtml(l.name)}')" title="Standort löschen">🗑️</button>`;
         }
         html += `</div></div>`;
         
-        // Objekte an diesem Standort
+        // Objekte an diesem Standort (nur Nicht-Fahrzeuge)
         if (locObjects.length > 0) {
             html += '<div style="margin-top:0.4rem; padding-left:1rem; border-left:2px dashed #ccc;">';
             locObjects.forEach(o => {
@@ -944,12 +1035,14 @@ function renderLocationTree(locs, level = 0) {
 // === Inspection Template Admin ===
 let templateFieldCount = 0;
 let templateEditId = null;
+let editingInspectionId = null;
 
 async function loadInspectionTemplatesList() {
     try {
+        // Admin sieht ALLE Prüfkarten, daher mit Admin-Rechten laden
         const templates = await api('/api/inspection-templates');
         document.getElementById('inspection-templates-list').innerHTML = `
-            <table><thead><tr><th>Name</th><th>Beschreibung</th><th>Kategorie</th><th>Felder</th><th>Aktionen</th></tr></thead>
+            <table><thead><tr><th>Name</th><th>Beschreibung</th><th>Kategorie</th><th>Felder</th><th>Standard</th><th>Aktionen</th></tr></thead>
             <tbody>${templates.map(t => {
                 let fields = [];
                 try { fields = JSON.parse(t.fields); } catch(e) {}
@@ -959,6 +1052,7 @@ async function loadInspectionTemplatesList() {
                     <td>${escapeHtml(t.description || '-')}</td>
                     <td>${t.object_type_id ? (masterData.types.find(ty => ty.id == t.object_type_id)?.name || '-') : 'Alle'}</td>
                     <td>${fields.length} Felder</td>
+                    <td>${t.allow_standard_users ? '<span style="color:#2e7d32; font-weight:600;">✅ Ja</span>' : '<span style="color:#999;">–</span>'}</td>
                     <td>
                         <button class="btn-primary btn-small" onclick="editInspectionTemplate(${t.id})">Bearbeiten</button>
                         <button class="btn-primary btn-small btn-delete" onclick="deleteInspectionTemplate(${t.id})">Löschen</button>
@@ -977,6 +1071,7 @@ function showInspectionTemplateForm() {
     document.getElementById('tmpl-fields-list').innerHTML = '';
     document.getElementById('tmpl-name').value = '';
     document.getElementById('tmpl-desc').value = '';
+    document.getElementById('tmpl-allow-standard').checked = false;
     templateFieldCount = 0;
     addTemplateField();
 }
@@ -984,6 +1079,7 @@ function showInspectionTemplateForm() {
 function hideInspectionTemplateForm() {
     document.getElementById('inspection-template-form-box').classList.add('hidden');
     document.getElementById('inspection-template-form').reset();
+    document.getElementById('tmpl-allow-standard').checked = false;
     templateEditId = null;
 }
 
@@ -996,7 +1092,8 @@ async function editInspectionTemplate(id) {
         document.getElementById('tmpl-name').value = t.name;
         document.getElementById('tmpl-desc').value = t.description || '';
         document.getElementById('tmpl-type').value = t.object_type_id || '';
-        
+        document.getElementById('tmpl-allow-standard').checked = t.allow_standard_users || false;
+
         // Felder laden
         document.getElementById('tmpl-fields-list').innerHTML = '';
         templateFieldCount = 0;
@@ -1026,11 +1123,11 @@ async function editInspectionTemplate(id) {
                 <input type="text" id="tmpl-f-${idx}-opts" placeholder="Optionen mit Komma trennen (nur für Auswahl)" style="margin-top:0.4rem; width:100%; ${f.type === 'select' ? '' : 'display:none;'}">
             `;
             container.appendChild(div);
-            
+
             if (f.options && f.options.length) {
                 div.querySelector(`#tmpl-f-${idx}-opts`).value = f.options.join(', ');
             }
-            
+
             const typeSel = div.querySelector(`#tmpl-f-${idx}-type`);
             const optsInput = div.querySelector(`#tmpl-f-${idx}-opts`);
             typeSel.onchange = () => {
@@ -1100,7 +1197,8 @@ async function saveInspectionTemplate(e) {
         name: document.getElementById('tmpl-name').value,
         description: document.getElementById('tmpl-desc').value || null,
         fields: fields,
-        object_type_id: document.getElementById('tmpl-type').value ? parseInt(document.getElementById('tmpl-type').value) : null
+        object_type_id: document.getElementById('tmpl-type').value ? parseInt(document.getElementById('tmpl-type').value) : null,
+        allow_standard_users: document.getElementById('tmpl-allow-standard').checked
     };
     
     try {
@@ -1126,8 +1224,10 @@ async function deleteInspectionTemplate(id) {
 let inspectionTemplates = [];
 
 async function openInspectionModal(objectId) {
+    editingInspectionId = null;
     document.getElementById('inspection-object-id').value = objectId;
     document.getElementById('inspection-modal').style.display = 'block';
+    document.getElementById('inspection-modal-title').textContent = 'Prüfung durchführen';
     document.getElementById('inspection-fields').innerHTML = '';
     document.getElementById('inspection-next-date').value = '';
     document.getElementById('inspection-notes').value = '';
@@ -1135,6 +1235,7 @@ async function openInspectionModal(objectId) {
     try {
         inspectionTemplates = await api('/api/inspection-templates');
         const sel = document.getElementById('inspection-template');
+        sel.disabled = false;
         sel.innerHTML = '<option value="">-- Prüfkarte wählen --</option>';
         inspectionTemplates.forEach(t => {
             const opt = document.createElement('option');
@@ -1147,6 +1248,7 @@ async function openInspectionModal(objectId) {
 
 function closeInspectionModal() {
     document.getElementById('inspection-modal').style.display = 'none';
+    editingInspectionId = null;
 }
 
 function loadInspectionTemplate() {
@@ -1238,13 +1340,100 @@ async function saveInspection(e) {
     };
 
     try {
-        await api('/api/objects/' + objectId + '/inspections', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-        closeInspectionModal();
-        alert('Prüfung gespeichert!');
+        if (editingInspectionId) {
+            // Bearbeiten (PUT)
+            await api('/api/inspections/' + editingInspectionId, {
+                method: 'PUT',
+                body: JSON.stringify(data)
+            });
+            closeInspectionModal();
+            alert('Prüfung aktualisiert!');
+            editingInspectionId = null;
+        } else {
+            // Neu anlegen (POST)
+            await api('/api/objects/' + objectId + '/inspections', {
+                method: 'POST',
+                body: JSON.stringify(data)
+            });
+            closeInspectionModal();
+            alert('Prüfung gespeichert!');
+        }
         openObject(parseInt(objectId));
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+async function editInspection(inspectionId) {
+    try {
+        const i = await api('/api/inspections/' + inspectionId);
+        editingInspectionId = inspectionId;
+
+        document.getElementById('inspection-object-id').value = i.object_id;
+        document.getElementById('inspection-modal').style.display = 'block';
+        document.getElementById('inspection-fields').innerHTML = '';
+        document.getElementById('inspection-next-date').value = i.next_inspection_date || '';
+        document.getElementById('inspection-notes').value = i.notes || '';
+        document.getElementById('inspection-modal-title').textContent = 'Prüfung bearbeiten';
+
+        // Template laden und Felder vorausfüllen
+        inspectionTemplates = await api('/api/inspection-templates');
+        const sel = document.getElementById('inspection-template');
+        sel.innerHTML = '';
+        inspectionTemplates.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.id;
+            opt.textContent = t.name;
+            sel.appendChild(opt);
+        });
+        sel.value = i.template_id;
+        sel.disabled = true; // Template kann nicht geändert werden
+
+        // Felder laden und mit bestehenden Werten füllen
+        const template = inspectionTemplates.find(t => t.id == i.template_id);
+        if (!template) return;
+
+        let fields;
+        try {
+            fields = JSON.parse(template.fields);
+        } catch (e) { alert('Fehler beim Laden der Prüfkarte'); return; }
+
+        let results = {};
+        try { results = JSON.parse(i.results); } catch(e) {}
+
+        let html = `<h4>${escapeHtml(template.name)}</h4>`;
+        if (template.description) html += `<p><small>${escapeHtml(template.description)}</small></p>`;
+
+        fields.forEach((field, idx) => {
+            const required = field.required ? 'required' : '';
+            const reqLabel = field.required ? ' *' : '';
+            const existingValue = results[field.label];
+            html += `<div class="inspection-field">`;
+
+            if (field.type === 'checkbox') {
+                html += `
+                    <label>
+                        <input type="checkbox" id="ins-field-${idx}" name="${escapeHtml(field.label)}" ${required} ${existingValue === true ? 'checked' : ''}>
+                        ${escapeHtml(field.label)}${reqLabel}
+                    </label>
+                `;
+            } else if (field.type === 'select' && field.options) {
+                html += `<label>${escapeHtml(field.label)}${reqLabel}</label>`;
+                html += `<select id="ins-field-${idx}" ${required}>`;
+                html += `<option value="">-- Auswählen --</option>`;
+                field.options.forEach(opt => {
+                    html += `<option value="${escapeHtml(opt)}" ${existingValue === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`;
+                });
+                html += `</select>`;
+            } else if (field.type === 'textarea') {
+                html += `<label>${escapeHtml(field.label)}${reqLabel}</label>`;
+                html += `<textarea id="ins-field-${idx}" rows="2" ${required}>${escapeHtml(existingValue || '')}</textarea>`;
+            } else {
+                html += `<label>${escapeHtml(field.label)}${reqLabel}</label>`;
+                html += `<input type="${field.type}" id="ins-field-${idx}" value="${escapeHtml(existingValue || '')}" ${required}>`;
+            }
+            html += `</div>`;
+        });
+
+        document.getElementById('inspection-fields').innerHTML = html;
     } catch (e) { alert('Fehler: ' + e.message); }
 }
 
@@ -1332,7 +1521,368 @@ window.onclick = function(event) {
     }
 };
 
+// === Import / Export ===
+async function exportCSV() {
+    try {
+        const res = await fetch('/api/export/csv', {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        if (!res.ok) throw new Error('Export fehlgeschlagen');
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const filename = res.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] || 'feuerwehr_export.csv';
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (e) { alert('Fehler beim Export: ' + e.message); }
+}
+
+async function importCSV() {
+    const fileInput = document.getElementById('import-csv-file');
+    if (!fileInput.files.length) {
+        alert('Bitte eine CSV-Datei auswählen');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+
+    try {
+        const res = await fetch('/api/import/csv', {
+            method: 'POST',
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            body: formData
+        });
+
+        const result = await res.json();
+        if (!res.ok) {
+            throw new Error(result.detail || 'Import fehlgeschlagen');
+        }
+
+        let html = `
+            <div style="padding:1rem; background:#e8f5e9; border-radius:8px; margin-top:1rem;">
+                <h4 style="margin-top:0;">✅ Import abgeschlossen</h4>
+                <p><strong>${result.created}</strong> neue Objekte angelegt</p>
+                <p><strong>${result.skipped}</strong> bestehende Objekte übersprungen</p>
+        `;
+        if (result.errors && result.errors.length) {
+            html += `<details><summary style="color:#c62828; cursor:pointer;">⚠️ ${result.errors.length} Fehler anzeigen</summary><ul style="margin-top:0.5rem; font-size:0.85rem;">`;
+            result.errors.forEach(err => {
+                html += `<li>${escapeHtml(err)}</li>`;
+            });
+            html += '</ul></details>';
+        }
+        html += '</div>';
+
+        document.getElementById('import-result').innerHTML = html;
+        fileInput.value = '';
+
+        if (result.created > 0) {
+            loadMasterData();
+        }
+    } catch (e) {
+        alert('Fehler beim Import: ' + e.message);
+    }
+}
+
+// === Vollständiges Backup (ZIP mit DB + Uploads) ===
+async function downloadFullBackup() {
+    try {
+        const res = await fetch('/api/export/full-backup', {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.detail || 'Download fehlgeschlagen');
+        }
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `feuerwehr_backup_${new Date().toISOString().slice(0,10)}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (e) { alert('Fehler beim Download: ' + e.message); }
+}
+
+async function uploadFullBackup(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (!file.name.endsWith('.zip')) {
+        alert('Bitte eine ZIP-Datei auswählen');
+        input.value = '';
+        return;
+    }
+    if (!confirm('⚠️ WARNUNG: Das aktuelle Backup wird komplett ersetzt (Datenbank + alle Bilder/Dokumente).\\n\\nBist du sicher?')) {
+        input.value = '';
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await fetch('/api/import/full-backup', {
+            method: 'POST',
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            body: formData
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Wiederherstellung fehlgeschlagen');
+        alert(data.message || 'Backup erfolgreich wiederhergestellt!');
+        setTimeout(() => location.reload(), 3000);
+    } catch (e) { alert('Fehler: ' + e.message); }
+    input.value = '';
+}
+
+// === Prüfarchiv ===
+function initArchiveYears() {
+    const sel = document.getElementById('archive-year');
+    if (!sel) return;
+    sel.innerHTML = '';
+    const currentYear = new Date().getFullYear();
+    for (let y = currentYear; y >= currentYear - 5; y--) {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y;
+        sel.appendChild(opt);
+    }
+}
+
+async function exportArchive() {
+    const year = document.getElementById('archive-year').value;
+    try {
+        const res = await fetch('/api/export/inspections/' + year, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        if (!res.ok) throw new Error('Archiv-Download fehlgeschlagen');
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `pruefarchiv_${year}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (e) { alert('Fehler beim Download: ' + e.message); }
+}
+
+async function exportArchivePDF() {
+    const year = document.getElementById('archive-year').value;
+    try {
+        const res = await fetch('/api/export/inspections/' + year + '/pdf', {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        if (!res.ok) {
+            if (res.status === 404) throw new Error('Keine Prüfungen für dieses Jahr gefunden');
+            throw new Error('PDF-Archiv-Download fehlgeschlagen');
+        }
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `pruefarchiv_${year}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (e) { alert('Fehler beim Download: ' + e.message); }
+}
+
+// === Messages / Dashboard ===
+let messages = [];
+
+async function loadDashboardMessages() {
+    try {
+        messages = await api('/api/messages');
+        renderDashboardMessages();
+    } catch (e) { console.error('Fehler beim Laden der Meldungen:', e); }
+}
+
+function renderDashboardMessages() {
+    const container = document.getElementById('messages-list');
+    if (!container) return;
+
+    if (!messages.length) {
+        container.innerHTML = '<p style="color:#999; padding:1rem;">Keine aktuellen Meldungen.</p>';
+        return;
+    }
+
+    const isAdminOrVerwaltung = currentUser && (currentUser.role === 'admin' || currentUser.role === 'verwaltung' || currentUser.role === 'erweitert');
+
+    let html = '';
+    messages.forEach(m => {
+        const isClosed = m.is_closed;
+        const opacity = isClosed ? 'opacity:0.6;' : '';
+        const priorityColors = { hoch: '#c62828', mittel: '#f57c00', niedrig: '#388e3c' };
+        const priorityColor = priorityColors[m.priority] || '#666';
+        const typeLabels = {
+            beschaedigung: 'Beschädigung',
+            auffaelligkeit: 'Auffälligkeit',
+            defekt: 'Defekt',
+            info: 'Info',
+            notiz: 'Notiz',
+            sonstiges: 'Sonstiges'
+        };
+        const statusLabels = {
+            offen: 'Offen',
+            in_bearbeitung: 'In Bearbeitung',
+            in_klaerung: 'In Klärung',
+            zur_reparatur: 'Zur Reparatur',
+            bedienungsfehler: 'Bedienungsfehler',
+            nicht_mehr_aufgetreten: 'Fehler nicht mehr aufgetreten',
+            geprueft_ok: 'Gerät geprüft u. in Ordnung',
+            entsorgt: 'Entsorgt',
+            abgeschlossen: 'Abgeschlossen'
+        };
+        const closedLabel = isClosed ? '<span class="badge" style="background:#555; color:white; margin-left:0.3rem;">✓ Abgeschlossen</span>' : '';
+
+        html += `
+            <div class="alert" style="margin-bottom:0.5rem; ${opacity} border-left:4px solid ${priorityColor};">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.5rem;">
+                    <div style="flex:1;">
+                        <strong style="color:${priorityColor};">${typeLabels[m.message_type] || m.message_type}</strong>
+                        <span class="badge" style="background:${priorityColor}; color:white; margin-left:0.3rem;">${m.priority}</span>
+                        <span class="badge badge-reserve" style="margin-left:0.3rem;">${statusLabels[m.status] || m.status}</span>
+                        ${closedLabel}<br>
+                        <strong>${escapeHtml(m.subject)}</strong>
+                        ${m.device_name || m.device_id ? `<br><small>🛠️ ${m.device_name ? escapeHtml(m.device_name) : ''} ${m.device_id ? '(' + escapeHtml(m.device_id) + ')' : ''}</small>` : ''}
+                        ${m.description ? `<br><small>${escapeHtml(m.description)}</small>` : ''}
+                        <br><small style="color:#666;">📅 ${new Date(m.created_at).toLocaleDateString('de-DE')} | 👤 ${m.reported_by_name ? escapeHtml(m.reported_by_name) : escapeHtml(m.created_by_name)}${m.reported_by_name ? ' (via ' + escapeHtml(m.created_by_name) + ')' : ''}</small>
+                    </div>
+                    ${isAdminOrVerwaltung ? `
+                        <div style="display:flex; gap:0.3rem; flex-wrap:wrap; align-items:center;">
+                            <select class="btn-small" style="padding:0.3rem; font-size:0.8rem;" onchange="updateMessageStatus(${m.id}, this.value)">
+                                <option value="">Status setzen...</option>
+                                <option value="in_bearbeitung">In Bearbeitung</option>
+                                <option value="in_klaerung">In Klärung</option>
+                                <option value="zur_reparatur">Zur Reparatur</option>
+                                <option value="bedienungsfehler">Bedienungsfehler</option>
+                                <option value="nicht_mehr_aufgetreten">Fehler nicht mehr aufgetreten</option>
+                                <option value="geprueft_ok">Gerät geprüft u. in Ordnung</option>
+                                <option value="entsorgt">Entsorgt</option>
+                            </select>
+                            <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.2rem; cursor:pointer;">
+                                <input type="checkbox" ${isClosed ? 'checked' : ''} onchange="toggleMessageClosed(${m.id}, this.checked)">
+                                Abgeschlossen
+                            </label>
+                            <button class="btn-primary btn-small btn-delete" onclick="deleteMessage(${m.id})">🗑️</button>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+function openMessageModal() {
+    document.getElementById('message-modal').style.display = 'block';
+    // Auto-Priorität basierend auf Typ
+    document.getElementById('msg-type').onchange = function() {
+        const type = this.value;
+        const prioritySel = document.getElementById('msg-priority');
+        if (type === 'beschaedigung' || type === 'defekt') {
+            prioritySel.value = 'hoch';
+        }
+    };
+}
+
+function closeMessageModal() {
+    document.getElementById('message-modal').style.display = 'none';
+    document.getElementById('message-form').reset();
+}
+
+async function saveMessage(e) {
+    e.preventDefault();
+    const data = {
+        message_type: document.getElementById('msg-type').value,
+        subject: document.getElementById('msg-subject').value,
+        device_name: document.getElementById('msg-device-name').value || null,
+        device_id: document.getElementById('msg-device-id').value || null,
+        description: document.getElementById('msg-description').value || null,
+        action: document.getElementById('msg-action').value || null,
+        priority: document.getElementById('msg-priority').value,
+        reported_by_name: document.getElementById('msg-reported-by').value || null
+    };
+
+    try {
+        await api('/api/messages', { method: 'POST', body: JSON.stringify(data) });
+        closeMessageModal();
+        alert('Meldung gespeichert!');
+        loadDashboardMessages();
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+async function updateMessageStatus(messageId, status) {
+    if (!status) return;
+    if (!confirm('Status wirklich ändern?')) return;
+    try {
+        await api('/api/messages/' + messageId + '/status', { method: 'PUT', body: JSON.stringify({ status }) });
+        loadDashboardMessages();
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+async function toggleMessageClosed(messageId, isClosed) {
+    try {
+        await api('/api/messages/' + messageId + '/status', { method: 'PUT', body: JSON.stringify({ is_closed: isClosed }) });
+        loadDashboardMessages();
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+async function deleteMessage(messageId) {
+    if (!confirm('Meldung wirklich löschen?')) return;
+    try {
+        await api('/api/messages/' + messageId, { method: 'DELETE' });
+        loadDashboardMessages();
+    } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+function scanQrForMessage() {
+    startQrScan((decodedText) => {
+        const match = decodedText.match(/FFW-\d+/);
+        const deviceId = match ? match[0] : decodedText;
+        document.getElementById('msg-device-id').value = deviceId;
+        // Gerätenamen automatisch laden
+        api('/api/objects/search?q=' + encodeURIComponent(deviceId)).then(data => {
+            if (data && data.length > 0) {
+                document.getElementById('msg-device-name').value = data[0].designation;
+            }
+        }).catch(() => {});
+    }, 'message-modal');
+}
+
+async function exportMessagesLog() {
+    try {
+        const res = await fetch('/api/export/messages-log', {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        if (!res.ok) throw new Error('Download fehlgeschlagen');
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `meldungslog_${new Date().toISOString().slice(0,10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (e) { alert('Fehler beim Download: ' + e.message); }
+}
+
 // === Init ===
-if (token) {
+// Prüfe ob QR-Login Parameter in URL vorhanden ist
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('qrlogin') === '1') {
+    handleQrLogin();
+} else if (token) {
     initApp();
 }

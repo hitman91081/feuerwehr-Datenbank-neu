@@ -129,6 +129,7 @@ class InspectionTemplateCreate(BaseModel):
     description: Optional[str] = None
     fields: List[InspectionField]
     object_type_id: Optional[int] = None
+    allow_standard_users: bool = False
 
 class InspectionTemplateResponse(BaseModel):
     id: int
@@ -136,6 +137,7 @@ class InspectionTemplateResponse(BaseModel):
     description: Optional[str] = None
     fields: str  # JSON string
     object_type_id: Optional[int] = None
+    allow_standard_users: bool = False
     created_at: Optional[datetime] = None
     class Config:
         from_attributes = True
@@ -171,6 +173,7 @@ class InventoryObjectPublicResponse(BaseModel):
     info_text: Optional[str] = None
     usage_hints: Optional[str] = None
     documents: List[DocumentResponse] = []
+    inspections: List[InspectionResponse] = []
     qr_code: Optional[QRCodeResponse] = None
     class Config:
         from_attributes = True
@@ -223,6 +226,8 @@ class InventoryObjectUpdate(BaseModel):
     usage_hints: Optional[str] = None
     acquisition_date: Optional[str] = None
     status: Optional[ObjectStatus] = None
+    maintenance_interval_days: Optional[int] = None
+    maintenance_notes: Optional[str] = None
 
 class MaintenanceCreate(BaseModel):
     interval_days: int
@@ -248,5 +253,39 @@ class SearchResult(BaseModel):
     title_image: Optional[str] = None
     location_name: Optional[str] = None
     location_id: Optional[int] = None
+    class Config:
+        from_attributes = True
+
+# --- Message Schemas ---
+class MessageCreate(BaseModel):
+    message_type: str
+    subject: str
+    device_name: Optional[str] = None
+    device_id: Optional[str] = None
+    description: Optional[str] = None
+    action: Optional[str] = None
+    priority: Optional[str] = None
+    reported_by_name: Optional[str] = None
+
+class MessageStatusUpdate(BaseModel):
+    status: Optional[str] = None
+    is_closed: Optional[bool] = None
+
+class MessageResponse(BaseModel):
+    id: int
+    message_type: str
+    subject: str
+    device_name: Optional[str] = None
+    device_id: Optional[str] = None
+    description: Optional[str] = None
+    action: Optional[str] = None
+    priority: str
+    status: str
+    is_closed: bool = False
+    reported_by_name: Optional[str] = None
+    created_by_name: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    updated_by_name: Optional[str] = None
     class Config:
         from_attributes = True
