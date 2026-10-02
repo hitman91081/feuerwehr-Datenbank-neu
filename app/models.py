@@ -33,6 +33,37 @@ class User(Base):
     created_objects = relationship("InventoryObject", back_populates="created_by")
     uploaded_documents = relationship("Document", back_populates="uploaded_by")
 
+
+class ApiClient(Base):
+    __tablename__ = "api_clients"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    key_prefix = Column(String, nullable=False, index=True)
+    key_hash = Column(String, nullable=False, unique=True, index=True)
+    scopes = Column(String, nullable=False, default="objects:read")
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_used_at = Column(DateTime)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    created_by = relationship("User")
+    audit_entries = relationship("ApiAuditLog", back_populates="client", cascade="all, delete-orphan")
+
+
+class ApiAuditLog(Base):
+    __tablename__ = "api_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("api_clients.id"), nullable=False, index=True)
+    action = Column(String, nullable=False)
+    resource_type = Column(String, nullable=False)
+    resource_id = Column(String)
+    details = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    client = relationship("ApiClient", back_populates="audit_entries")
+
 # --- Stammdaten ---
 class ObjectType(Base):
     __tablename__ = "object_types"
@@ -49,6 +80,14 @@ class Manufacturer(Base):
     name = Column(String, unique=True, nullable=False)
     
     objects = relationship("InventoryObject", back_populates="manufacturer")
+
+class Supplier(Base):
+    __tablename__ = "suppliers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+
+    objects = relationship("InventoryObject", back_populates="supplier")
 
 class Location(Base):
     __tablename__ = "locations"
@@ -74,18 +113,23 @@ class InventoryObject(Base):
     object_number = Column(String, unique=True, index=True, nullable=False)  # eindeutige ID z.B. FFW-00001
     serial_number = Column(String)
     manufacturer_id = Column(Integer, ForeignKey("manufacturers.id"))
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"))
     location_id = Column(Integer, ForeignKey("locations.id"))
     title_image = Column(String)  # Pfad zum Titelbild
     info_text = Column(Text)
     usage_hints = Column(Text)  # Hinweise / Tipps zur Benutzung
     acquisition_date = Column(String)  # YYYY-MM-DD
     status = Column(Enum(ObjectStatus), default=ObjectStatus.IN_BENUTZUNG, nullable=False)
+    inspection_required = Column(Boolean, default=True, nullable=False)
+    standard_inspection_enabled = Column(Boolean, default=False, nullable=False)
+    standard_inspection_template_id = Column(Integer, ForeignKey("inspection_templates.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_by_id = Column(Integer, ForeignKey("users.id"))
     
     object_type = relationship("ObjectType", back_populates="objects")
     manufacturer = relationship("Manufacturer", back_populates="objects")
+    supplier = relationship("Supplier", back_populates="objects")
     location = relationship("Location", foreign_keys=[location_id], back_populates="objects")
     created_by = relationship("User", back_populates="created_objects")
     linked_location = relationship("Location", foreign_keys="Location.linked_object_id", back_populates="linked_object")
@@ -94,6 +138,7 @@ class InventoryObject(Base):
     repairs = relationship("Repair", back_populates="inventory_object", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="inventory_object", cascade="all, delete-orphan")
     qr_code = relationship("QRCode", back_populates="inventory_object", uselist=False, cascade="all, delete-orphan")
+    standard_inspection_template = relationship("InspectionTemplate", foreign_keys=[standard_inspection_template_id])
 
 class ObjectImage(Base):
     __tablename__ = "object_images"
@@ -111,12 +156,14 @@ class Maintenance(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     object_id = Column(Integer, ForeignKey("inventory_objects.id"), nullable=False)
+    description = Column(String, nullable=False, default="Allgemeine Prüfung / Wartung")
     interval_days = Column(Integer, nullable=False)
     last_maintenance_date = Column(String)  # YYYY-MM-DD
     next_maintenance_date = Column(String)  # YYYY-MM-DD
     notes = Column(Text)
     
     inventory_object = relationship("InventoryObject", back_populates="maintenances")
+    inspections = relationship("Inspection", back_populates="maintenance")
 
 class Repair(Base):
     __tablename__ = "repairs"
@@ -131,11 +178,24 @@ class Repair(Base):
     
     inventory_object = relationship("InventoryObject", back_populates="repairs")
 
+
+class DocumentLabel(Base):
+    __tablename__ = "document_labels"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    documents = relationship("Document", back_populates="label")
+
+
 class Document(Base):
     __tablename__ = "documents"
     
     id = Column(Integer, primary_key=True, index=True)
-    object_id = Column(Integer, ForeignKey("inventory_objects.id"), nullable=False)
+    object_id = Column(Integer, ForeignKey("inventory_objects.id"), nullable=True)
+    label_id = Column(Integer, ForeignKey("document_labels.id"), nullable=True)
     filename = Column(String, nullable=False)
     original_name = Column(String, nullable=False)
     file_type = Column(String)  # image, pdf, text, etc.
@@ -144,6 +204,7 @@ class Document(Base):
     uploaded_by_id = Column(Integer, ForeignKey("users.id"))
     
     inventory_object = relationship("InventoryObject", back_populates="documents")
+    label = relationship("DocumentLabel", back_populates="documents")
     uploaded_by = relationship("User", back_populates="uploaded_documents")
 
 class QRCode(Base):
@@ -165,6 +226,7 @@ class InspectionTemplate(Base):
     description = Column(Text)
     fields = Column(Text, nullable=False)  # JSON: [{"label": "Visueller Zustand", "type": "checkbox", "required": true}, ...]
     object_type_id = Column(Integer, ForeignKey("object_types.id"), nullable=True)
+    default_interval_days = Column(Integer, nullable=True)
     allow_standard_users = Column(Boolean, default=False)  # Für Standardnutzer sichtbar?
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -177,7 +239,9 @@ class Inspection(Base):
     id = Column(Integer, primary_key=True, index=True)
     object_id = Column(Integer, ForeignKey("inventory_objects.id"), nullable=False)
     template_id = Column(Integer, ForeignKey("inspection_templates.id"), nullable=False)
+    maintenance_id = Column(Integer, ForeignKey("maintenances.id"), nullable=True)
     inspected_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    inspector_name = Column(String)  # Tatsächlicher Prüfer, wichtig bei gemeinsamem QR-Login
     inspected_at = Column(DateTime, default=datetime.utcnow)
     results = Column(Text, nullable=False)  # JSON: {"Visueller Zustand": true, "Druck": "12 bar", ...}
     next_inspection_date = Column(String)  # YYYY-MM-DD
@@ -185,7 +249,21 @@ class Inspection(Base):
     
     inventory_object = relationship("InventoryObject", back_populates="inspections")
     template = relationship("InspectionTemplate", back_populates="inspections")
+    maintenance = relationship("Maintenance", back_populates="inspections")
     inspected_by = relationship("User", back_populates="inspections")
+    images = relationship("InspectionImage", back_populates="inspection", cascade="all, delete-orphan")
+
+class InspectionImage(Base):
+    __tablename__ = "inspection_images"
+
+    id = Column(Integer, primary_key=True, index=True)
+    inspection_id = Column(Integer, ForeignKey("inspections.id"), nullable=False)
+    filename = Column(String, nullable=False)
+    original_name = Column(String)
+    comment = Column(Text, nullable=False)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+
+    inspection = relationship("Inspection", back_populates="images")
 
 # --- Meldungen / Dashboard ---
 class MessageType(str, enum.Enum):
@@ -197,8 +275,10 @@ class MessageType(str, enum.Enum):
     SONSTIGES = "sonstiges"
 
 class MessageAction(str, enum.Enum):
+    KEINE = "keine"
     AUSSER_BETRIEB = "ausser_betrieb"
     AUF_FAHRZEUG = "auf_fahrzeug"
+    IN_WERKSTATT = "in_werkstatt"
     ENTSORGT = "entsorgt"
     SONSTIGES = "sonstiges"
 
@@ -223,22 +303,64 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True, index=True)
+    inventory_object_id = Column(Integer, ForeignKey("inventory_objects.id"), index=True)
     message_type = Column(Enum(MessageType), nullable=False)
     subject = Column(String, nullable=False)
     device_name = Column(String)
     device_id = Column(String)
     description = Column(Text)
-    action = Column(Enum(MessageAction), default=MessageAction.SONSTIGES)
+    action = Column(Enum(MessageAction), default=MessageAction.KEINE)
+    action_comment = Column(Text)
     priority = Column(Enum(MessagePriority), default=MessagePriority.MITTEL)
     status = Column(Enum(MessageStatus), default=MessageStatus.OFFEN)
     is_closed = Column(Boolean, default=False)  # Separates "Abgeschlossen"-Flag
+    is_visible_to_standard = Column(Boolean, default=True, nullable=False)
+    is_archived = Column(Boolean, default=False, nullable=False)
+    archive_reason = Column(String)
+    archived_at = Column(DateTime)
+    archived_by_name = Column(String)
     reported_by_name = Column(String)  # Name des eigentlichen Meldenden (z.B. bei Standard-Login)
     created_by_name = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     updated_by_name = Column(String)
+    images = relationship("MessageImage", back_populates="message", cascade="all, delete-orphan")
+    inventory_object = relationship("InventoryObject", back_populates="messages")
+    history = relationship(
+        "MessageHistory",
+        back_populates="message",
+        cascade="all, delete-orphan",
+        order_by="MessageHistory.created_at.asc()"
+    )
+
+class MessageImage(Base):
+    __tablename__ = "message_images"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("messages.id"), nullable=False)
+    filename = Column(String, nullable=False)
+    original_name = Column(String)
+    comment = Column(Text, nullable=False)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+
+    message = relationship("Message", back_populates="images")
+
+class MessageHistory(Base):
+    __tablename__ = "message_history_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("messages.id"), nullable=False, index=True)
+    entry_type = Column(String, nullable=False)  # status, comment oder visibility
+    status = Column(String)
+    details = Column(Text)
+    expected_end_date = Column(DateTime)
+    author_name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    message = relationship("Message", back_populates="history")
 
 # Beziehungen zu bestehenden Modellen ergänzen
 ObjectType.inspection_templates = relationship("InspectionTemplate", back_populates="object_type")
 InventoryObject.inspections = relationship("Inspection", back_populates="inventory_object", cascade="all, delete-orphan", order_by="Inspection.inspected_at.desc()")
+InventoryObject.messages = relationship("Message", back_populates="inventory_object", order_by="Message.created_at.desc()")
 User.inspections = relationship("Inspection", back_populates="inspected_by")

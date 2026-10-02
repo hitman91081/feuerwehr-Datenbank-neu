@@ -49,6 +49,8 @@ Im Browser: [http://localhost:8000](http://localhost:8000)
 
 [http://localhost:8000/docs](http://localhost:8000/docs)
 
+Externe Programme verwenden API-Schlüssel statt Benutzerpasswörtern. Beispiele und Hinweise stehen in [API.md](API.md).
+
 ## Benutzerrollen & Rechte
 
 | Rolle | Objekte ansehen | Objekte bearbeiten | Benutzer verwalten |

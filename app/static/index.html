@@ -4,8 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Feuerwehr Inventar</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=2">
+    <link rel="stylesheet" href="/static/css/style.css?v=45">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.4/dist/iife/reader/index.js" defer></script>
 </head>
 <body>
     <!-- Login Screen -->
@@ -26,17 +27,24 @@
     <!-- App Screen -->
     <div id="app-screen" class="screen hidden">
         <header class="app-header">
-            <h1 onclick="showView('dashboard')">🚒 Inventar</h1>
+            <div class="header-navigation">
+                <button id="header-back" class="btn-icon hidden" onclick="navigateBack()" title="Zurück" aria-label="Zurück">←</button>
+                <h1 onclick="showView('dashboard')">🚒 Inventar</h1>
+            </div>
             <div class="header-actions">
                 <span id="user-name"></span>
-                <button class="btn-icon" onclick="toggleMenu()" title="Menü">☰</button>
+                <button id="menu-toggle" class="btn-icon" onclick="toggleMenu()" title="Menü" aria-label="Menü" aria-controls="mobile-menu" aria-expanded="false">☰</button>
             </div>
         </header>
 
         <nav id="mobile-menu" class="mobile-menu hidden">
             <button onclick="showView('dashboard')">🏠 Start</button>
             <button onclick="showView('search')">🔍 Suche</button>
-            <button id="nav-new-object" class="hidden" onclick="showView('edit-object')">➕ Objekt anlegen</button>
+            <button onclick="openDocumentCollection()">📚 Dokumentensammlung</button>
+            <button id="nav-inspection-center" class="hidden" onclick="showView('inspection-center')">🗓️ Prüfzentrale</button>
+            <button id="nav-message-archive" class="hidden" onclick="showView('message-archive')">🗄️ Meldungsarchiv</button>
+            <button id="nav-new-object" class="hidden" onclick="openNewObjectForm()">➕ Objekt anlegen</button>
+            <button id="nav-bulk-create" class="hidden" onclick="openBulkCreateForm()">📦 Sammelanlage</button>
             <button id="nav-admin" class="hidden" onclick="showView('admin')">⚙️ Verwaltung</button>
             <button onclick="logout()">🚪 Abmelden</button>
         </nav>
@@ -51,10 +59,20 @@
                         <h3>Objekt suchen</h3>
                         <p>Nach ID, Name oder QR-Code</p>
                     </div>
-                    <div class="dash-card hidden" id="dash-new" onclick="showView('edit-object')">
+                    <div class="dash-card hidden" id="dash-new" onclick="openNewObjectForm()">
                         <div class="dash-icon">➕</div>
                         <h3>Neues Objekt</h3>
                         <p>Gerät oder Ausrüstung anlegen</p>
+                    </div>
+                    <div class="dash-card hidden" id="dash-bulk-create" onclick="openBulkCreateForm()">
+                        <div class="dash-icon">📦</div>
+                        <h3>Sammelanlage</h3>
+                        <p>Gleichartige Artikel mit fortlaufenden Seriennummern anlegen</p>
+                    </div>
+                    <div class="dash-card hidden" id="dash-inspection-center" onclick="showView('inspection-center')">
+                        <div class="dash-icon">🗓️</div>
+                        <h3>Prüfzentrale</h3>
+                        <p>Anstehende und überfällige Prüfungen</p>
                     </div>
                     <div class="dash-card" onclick="startQrScan()">
                         <div class="dash-icon">📷</div>
@@ -66,6 +84,16 @@
                         <h3>Meldung anlegen</h3>
                         <p>Mangel, Defekt oder Info melden</p>
                     </div>
+                    <div class="dash-card hidden" id="dash-message-archive" onclick="showView('message-archive')">
+                        <div class="dash-icon">🗄️</div>
+                        <h3>Meldungsarchiv</h3>
+                        <p>Abgeschlossene und entfernte Vorgänge</p>
+                    </div>
+                    <div class="dash-card" onclick="openDocumentCollection()">
+                        <div class="dash-icon">📚</div>
+                        <h3>Dokumentensammlung</h3>
+                        <p>Anleitungen, Datenblätter und weitere Unterlagen</p>
+                    </div>
                 </div>
 
                 <!-- Meldungen / Messages -->
@@ -75,11 +103,172 @@
                 </div>
             </div>
 
+            <!-- Document Collection -->
+            <div id="view-documents" class="view hidden document-library-view">
+                <div class="view-heading document-library-heading">
+                    <div>
+                        <span class="form-eyebrow">Zentrale Ablage</span>
+                        <h2>📚 Dokumentensammlung</h2>
+                        <p>Alle hochgeladenen Unterlagen – mit oder ohne Zuordnung zu einem Inventarartikel.</p>
+                    </div>
+                </div>
+                <div class="document-type-shortcuts" aria-label="Dokument-Schnellfilter">
+                    <button type="button" class="btn-secondary document-instruction-shortcut" onclick="filterDocumentCollectionByLabel('Prüfanweisung')">📋 Alle Prüfanweisungen anzeigen</button>
+                </div>
+                <div class="search-header document-search-header">
+                    <input type="search" id="document-search" aria-label="Dokument suchen" placeholder="Dokument suchen: Dateiname, Label, Objekt oder Inventarnummer …" oninput="debouncedDocumentSearch()">
+                    <button id="document-upload-toggle" type="button" class="btn-primary document-upload-toggle hidden" onclick="toggleDocumentUploadPanel()" aria-expanded="false" aria-controls="document-upload-panel">＋ <span>Dokument</span></button>
+                </div>
+                <div class="filter-bar document-filter-bar">
+                    <select id="document-label-filter" aria-label="Dokumentenlabel filtern" onchange="loadDocumentCollection()"><option value="">Alle Labels</option></select>
+                    <select id="document-assignment-filter" aria-label="Dokumentenzuordnung filtern" onchange="loadDocumentCollection()">
+                        <option value="all">Alle Dokumente</option>
+                        <option value="assigned">Mit Inventarartikel</option>
+                        <option value="unassigned">Ohne Inventarartikel</option>
+                    </select>
+                    <button type="button" class="btn-secondary btn-small" onclick="resetDocumentFilters()">🔄 Reset</button>
+                </div>
+                <div id="document-library-summary" class="document-library-summary" aria-live="polite"></div>
+
+                <section id="document-upload-panel" class="document-upload-panel hidden">
+                    <div class="form-section-heading">
+                        <span class="form-section-icon">＋</span>
+                        <div><h3>Dokument hinzufügen</h3><p>Allgemeine Unterlage ohne Inventarzuordnung ablegen.</p></div>
+                        <button type="button" class="btn-secondary btn-small document-upload-close" onclick="toggleDocumentUploadPanel(false)">Schließen</button>
+                    </div>
+                    <form id="standalone-document-form" onsubmit="uploadStandaloneDocument(event)">
+                        <div class="document-upload-grid">
+                            <div class="form-field">
+                                <label for="standalone-document-file">Datei <span class="required-mark">*</span></label>
+                                <input type="file" id="standalone-document-file" accept=".pdf,.txt,.md,image/*" multiple required>
+                            </div>
+                            <div class="form-field">
+                                <label for="standalone-document-label">Label <span class="required-mark">*</span></label>
+                                <select id="standalone-document-label" required></select>
+                            </div>
+                            <label class="document-public-toggle"><input type="checkbox" id="standalone-document-public" checked> Für Standardnutzer sichtbar</label>
+                            <button type="submit" class="btn-primary">Dokument hochladen</button>
+                        </div>
+                    </form>
+                    <div class="document-label-create-row">
+                        <label for="new-document-label">Neues Label ergänzen</label>
+                        <div class="input-with-action">
+                            <input type="text" id="new-document-label" maxlength="120" placeholder="z. B. Schulungsunterlage">
+                            <button type="button" class="btn-secondary" onclick="createDocumentLabel()">＋ Label</button>
+                        </div>
+                    </div>
+                </section>
+                <div id="document-library-results" class="document-library-results"></div>
+            </div>
+
+            <!-- Inspection Center (Verwaltung & Admin) -->
+            <div id="view-inspection-center" class="view hidden inspection-center-view">
+                <div class="view-heading inspection-center-heading">
+                    <div>
+                        <span class="form-eyebrow">Nur Verwaltung und Admin</span>
+                        <h2>🗓️ Prüfzentrale</h2>
+                        <p>Alle anstehenden Prüfungen für den gewählten Zeitraum.</p>
+                    </div>
+                </div>
+                <form id="inspection-center-filter" class="inspection-filter-card" onsubmit="loadInspectionCenter(event)">
+                    <div class="inspection-filter-grid">
+                        <div class="message-archive-select-field">
+                            <label for="inspection-center-from">Von</label>
+                            <input type="date" id="inspection-center-from" required>
+                        </div>
+                        <div class="message-archive-select-field">
+                            <label for="inspection-center-to">Bis</label>
+                            <input type="date" id="inspection-center-to" required>
+                        </div>
+                        <label class="inspection-overdue-toggle" for="inspection-center-overdue">
+                            <input type="checkbox" id="inspection-center-overdue" checked>
+                            Überfällige mit anzeigen
+                        </label>
+                        <button type="submit" class="btn-primary">Zeitraum anzeigen</button>
+                    </div>
+                    <div class="inspection-presets" aria-label="Zeitraum auswählen">
+                        <button type="button" class="btn-secondary btn-small" onclick="setInspectionCenterRange(30)">30 Tage</button>
+                        <button type="button" class="btn-secondary btn-small" onclick="setInspectionCenterRange(90)">90 Tage</button>
+                        <button type="button" class="btn-secondary btn-small" onclick="setInspectionCenterRange(180)">6 Monate</button>
+                        <button type="button" class="btn-secondary btn-small" onclick="setInspectionCenterRange(365)">1 Jahr</button>
+                    </div>
+                    <div class="inspection-center-tools">
+                        <div class="inspection-center-search">
+                            <label for="inspection-center-search">Gerät in den Terminen finden</label>
+                            <div class="inspection-search-input-row">
+                                <input type="search" id="inspection-center-search" placeholder="Bezeichnung, FFW-ID oder Seriennummer" autocomplete="off" oninput="inspectionCenterSearchChanged()">
+                                <button type="button" class="btn-secondary" onclick="scanInspectionCenterSearch()" aria-label="QR-Code oder Seriennummer scannen">📷 Scannen</button>
+                                <button type="button" class="btn-secondary inspection-search-clear" onclick="clearInspectionCenterSearch()" aria-label="Suche leeren">✕</button>
+                            </div>
+                        </div>
+                        <label class="inspection-group-toggle" for="inspection-center-grouped">
+                            <input type="checkbox" id="inspection-center-grouped" checked onchange="filterInspectionCenter()">
+                            Gleiche Termine und Gerätetypen gruppieren
+                        </label>
+                    </div>
+                </form>
+                <div id="inspection-center-summary" class="inspection-summary-grid" aria-live="polite"></div>
+                <div id="inspection-center-result-meta" class="inspection-result-meta" aria-live="polite"></div>
+                <div id="inspection-center-results" class="inspection-due-list"></div>
+            </div>
+
+            <!-- Meldungsarchiv (Erweitert, Verwaltung & Admin) -->
+            <div id="view-message-archive" class="view hidden message-archive-view">
+                <div class="view-heading inspection-center-heading">
+                    <div>
+                        <span class="form-eyebrow">Nur für berechtigte Nutzer</span>
+                        <h2>🗄️ Meldungsarchiv</h2>
+                        <p>Abgeschlossene und aus der aktuellen Liste entfernte Vorgänge dauerhaft durchsuchen.</p>
+                    </div>
+                </div>
+                <form id="message-archive-filter" class="inspection-filter-card" onsubmit="filterMessageArchive(event)">
+                    <div class="message-archive-filter-grid">
+                        <div class="message-archive-search-field">
+                            <label for="message-archive-search">Suche</label>
+                            <div class="inspection-search-input-row">
+                                <input type="search" id="message-archive-search" placeholder="Thema, Artikel, FFW-ID, Firma oder Name" autocomplete="off" oninput="filterMessageArchive()">
+                                <button type="button" class="btn-secondary" onclick="scanMessageArchiveSearch()" aria-label="Artikel per QR-Code suchen">📷 Scannen</button>
+                            </div>
+                        </div>
+                        <div class="message-archive-select-field">
+                            <label for="message-archive-resolution-filter">Ergebnis</label>
+                            <select id="message-archive-resolution-filter" onchange="filterMessageArchive()">
+                                <option value="">Alle Ergebnisse</option>
+                                <option value="abgeschlossen">Abgeschlossen</option>
+                                <option value="entsorgt">Entsorgt</option>
+                                <option value="weiter_in_klaerung">Weiter in Klärung</option>
+                                <option value="altbestand">Früher entfernt / Altbestand</option>
+                            </select>
+                        </div>
+                        <div class="message-archive-select-field">
+                            <label for="message-archive-link-filter">Artikelzuordnung</label>
+                            <select id="message-archive-link-filter" onchange="filterMessageArchive()">
+                                <option value="">Alle Vorgänge</option>
+                                <option value="linked">Mit Inventarartikel</option>
+                                <option value="unlinked">Ohne Inventarartikel</option>
+                            </select>
+                        </div>
+                        <div class="message-archive-date-field">
+                            <label for="message-archive-from">Von</label>
+                            <input type="date" id="message-archive-from" onchange="filterMessageArchive()">
+                        </div>
+                        <div class="message-archive-date-field">
+                            <label for="message-archive-to">Bis</label>
+                            <input type="date" id="message-archive-to" onchange="filterMessageArchive()">
+                        </div>
+                        <button type="button" class="btn-secondary message-archive-reset" onclick="resetMessageArchiveFilters()">Filter zurücksetzen</button>
+                    </div>
+                </form>
+                <div id="message-archive-summary" class="inspection-summary-grid" aria-live="polite"></div>
+                <div id="message-archive-result-meta" class="inspection-result-meta" aria-live="polite"></div>
+                <div id="message-archive-results" class="message-archive-results"></div>
+            </div>
+
             <!-- Search -->
             <div id="view-search" class="view hidden">
                 <div class="search-header">
                     <input type="text" id="search-input" placeholder="Suche nach Bezeichnung, ID oder Seriennummer..." oninput="debouncedSearch()">
-                    <button class="btn-secondary" onclick="startQrScan()">📷 QR</button>
+                    <button class="btn-secondary" onclick="startQrScan()">📷 QR / Barcode</button>
                 </div>
                 <div class="filter-bar">
                     <select id="filter-type" onchange="applyFilters()"><option value="">Alle Kategorien</option></select>
@@ -100,9 +289,27 @@
 
             <!-- QR Scanner -->
             <div id="view-scanner" class="view hidden">
-                <h2>QR-Code scannen</h2>
+                <h2 id="scanner-title">QR-Code scannen</h2>
+                <p id="scanner-hint" class="scanner-hint">Code in den markierten Bereich halten.</p>
+                <div id="scanner-status" class="scanner-status" role="status" aria-live="polite">Kamera wird vorbereitet …</div>
+                <video id="scanner-video" class="scanner-video hidden" playsinline muted></video>
                 <div id="qr-reader"></div>
-                <button class="btn-secondary" onclick="stopQrScan()">Abbrechen</button>
+                <div class="scanner-controls">
+                    <button id="scanner-start-camera" type="button" class="btn-primary" onclick="startScannerCameraAccess()">📷 Kamera starten</button>
+                    <select id="scanner-camera" class="hidden" aria-label="Kamera auswählen" onchange="switchScannerCamera(this.value)"></select>
+                    <button id="scanner-focus" type="button" class="btn-secondary hidden" onclick="refocusScannerCamera()">🎯 Neu fokussieren</button>
+                    <button id="scanner-torch" type="button" class="btn-secondary hidden" onclick="toggleScannerTorch()">🔦 Licht einschalten</button>
+                    <button type="button" class="btn-secondary" onclick="document.getElementById('scanner-image-input').click()">🖼️ Foto aufnehmen/auswählen</button>
+                    <input id="scanner-image-input" class="hidden" type="file" accept="image/*" capture="environment" onchange="scanCodeFromImage(this)">
+                </div>
+                <div class="scanner-manual">
+                    <label for="scanner-manual-value">Code alternativ manuell eingeben</label>
+                    <div class="input-with-action">
+                        <input id="scanner-manual-value" type="text" inputmode="text" autocomplete="off" placeholder="Seriennummer, Barcode oder Objekt-ID">
+                        <button type="button" class="btn-primary" onclick="submitManualScan()">Übernehmen</button>
+                    </div>
+                </div>
+                <button class="btn-secondary scanner-cancel" onclick="stopQrScan()">Abbrechen</button>
             </div>
 
             <!-- Object Detail (Wikipedia Style) -->
@@ -113,26 +320,73 @@
                 </div>
             </div>
 
+            <!-- In-App Document Preview -->
+            <div id="view-document" class="view hidden document-preview-view">
+                <div class="document-preview-header">
+                    <button type="button" class="btn-secondary document-back-button" onclick="navigateBack('documents')">← Zurück</button>
+                    <div class="document-preview-title">
+                        <small>Dokumentvorschau</small>
+                        <h2 id="document-preview-name">PDF-Dokument</h2>
+                    </div>
+                    <a id="document-preview-external" class="btn-primary btn-small" href="#" target="_blank" rel="noopener">In neuem Tab</a>
+                </div>
+                <object id="document-preview-frame" class="document-preview-frame" type="application/pdf" data="">
+                    <div class="document-preview-fallback">
+                        <p>Dieses PDF kann in deinem Browser nicht direkt eingebettet werden.</p>
+                        <a id="document-preview-fallback-link" class="btn-primary" href="#" target="_blank" rel="noopener">PDF öffnen</a>
+                    </div>
+                </object>
+            </div>
+
             <!-- Inspection Modal -->
             <div id="inspection-modal" class="modal">
-                <div class="modal-content">
+                <div class="modal-content inspection-modal-content">
                     <span class="close" onclick="closeInspectionModal()">&times;</span>
                     <h2 id="inspection-modal-title">Prüfung durchführen</h2>
                     <form id="inspection-form" onsubmit="saveInspection(event)">
                         <input type="hidden" id="inspection-object-id">
+                        <div class="inspection-inspector-field">
+                            <label for="inspection-inspector-name">Name Prüfer *</label>
+                            <input type="text" id="inspection-inspector-name" required autocomplete="name" maxlength="200" placeholder="Vor- und Nachname">
+                            <small>Wird unabhängig vom angemeldeten Benutzer im Prüfprotokoll gespeichert.</small>
+                        </div>
                         <div>
                             <label>Prüfkarte *</label>
                             <select id="inspection-template" required onchange="loadInspectionTemplate()"></select>
                         </div>
+                        <div id="inspection-maintenance-field" class="inspection-deadline-field">
+                            <label for="inspection-maintenance">Welche Prüffrist wird mit dieser Prüfung erfüllt?</label>
+                            <select id="inspection-maintenance" onchange="updateInspectionDueSelection()">
+                                <option value="">Keine Prüffrist zurücksetzen</option>
+                            </select>
+                            <small id="inspection-maintenance-help">Für tägliche Kontrollen oder zusätzliche Prüfungen „Keine Prüffrist“ wählen.</small>
+                        </div>
                         <div id="inspection-fields"></div>
                         <div>
-                            <label>Nächster Prüftermin</label>
+                            <label for="inspection-next-date">Nächster Prüftermin</label>
                             <input type="date" id="inspection-next-date">
+                            <small id="inspection-next-date-help" class="field-help">Kann bei Bedarf geändert werden.</small>
                         </div>
                         <div>
                             <label>Bemerkungen</label>
                             <textarea id="inspection-notes" rows="2"></textarea>
                         </div>
+                        <section class="inspection-evidence-section">
+                            <div class="inspection-evidence-heading">
+                                <div>
+                                    <h3>📷 Mängel- und Hinweisbilder</h3>
+                                    <p>Optional. Zu jedem Bild ist ein Kommentar erforderlich.</p>
+                                </div>
+                                <div class="inspection-image-source-actions" aria-label="Bild hinzufügen">
+                                    <button type="button" class="btn-secondary" onclick="document.getElementById('inspection-camera-input').click()">📷 Bild aufnehmen</button>
+                                    <button type="button" class="btn-secondary" onclick="document.getElementById('inspection-upload-input').click()">⬆ Bild hochladen</button>
+                                </div>
+                                <input id="inspection-camera-input" class="hidden" type="file" accept="image/*" capture="environment" onchange="addInspectionImages(this)">
+                                <input id="inspection-upload-input" class="hidden" type="file" accept="image/*" multiple onchange="addInspectionImages(this)">
+                            </div>
+                            <div id="inspection-existing-images" class="inspection-image-list"></div>
+                            <div id="inspection-pending-images" class="inspection-image-list"></div>
+                        </section>
                         <div class="form-actions">
                             <button type="button" class="btn-secondary" onclick="closeInspectionModal()">Abbrechen</button>
                             <button type="submit" class="btn-primary">Prüfung speichern</button>
@@ -143,94 +397,342 @@
 
             <!-- Objects by Location -->
             <div id="view-location-objects" class="view hidden">
-                <h2 id="location-objects-title">Objekte am Standort</h2>
+                <div class="view-heading">
+                    <button class="btn-secondary btn-small" onclick="navigateBack('search')">← Zurück</button>
+                    <h2 id="location-objects-title">Objekte am Standort</h2>
+                </div>
                 <div id="location-objects-list" class="card-list"></div>
             </div>
 
+            <!-- Bulk Object Creation -->
+            <div id="view-bulk-create" class="view hidden object-editor bulk-create-view">
+                <div class="object-form-intro">
+                    <span class="form-eyebrow">Mehrere Artikel erfassen</span>
+                    <h2>📦 Sammelanlage</h2>
+                    <p>Erstellt bis zu 100 gleichartige Objekte. Vor dem Speichern werden alle Seriennummern zur Kontrolle angezeigt.</p>
+                </div>
+                <form id="bulk-object-form" onsubmit="previewBulkObjects(event)" oninput="invalidateBulkPreview()">
+                    <div id="bulk-form-message" class="form-message hidden" role="alert"></div>
+                    <section class="object-form-section">
+                        <div class="form-section-heading">
+                            <span class="form-section-icon">📦</span>
+                            <div><h3>Grunddaten</h3><p>Diese Angaben gelten für alle Objekte der Serie.</p></div>
+                        </div>
+                        <div class="form-grid">
+                            <div class="form-field">
+                                <label for="bulk-quantity">Anzahl <span class="required-mark">*</span></label>
+                                <input type="number" id="bulk-quantity" min="1" max="100" value="30" inputmode="numeric" required>
+                            </div>
+                            <div class="form-field form-field-wide">
+                                <label for="bulk-designation">Bezeichnung <span class="required-mark">*</span></label>
+                                <input type="text" id="bulk-designation" maxlength="250" placeholder="z. B. C-Schlauch 20 m" required>
+                            </div>
+                            <div class="form-field">
+                                <label for="bulk-type">Kategorie <span class="required-mark">*</span></label>
+                                <select id="bulk-type" required></select>
+                            </div>
+                            <div class="form-field">
+                                <label for="bulk-manufacturer">Hersteller</label>
+                                <select id="bulk-manufacturer"></select>
+                            </div>
+                            <div class="form-field">
+                                <label for="bulk-supplier">Lieferant</label>
+                                <select id="bulk-supplier"></select>
+                            </div>
+                            <div class="form-field">
+                                <label for="bulk-location">Standort</label>
+                                <select id="bulk-location"></select>
+                            </div>
+                            <div class="form-field">
+                                <label for="bulk-acquisition">Anschaffungsdatum</label>
+                                <input type="date" id="bulk-acquisition">
+                            </div>
+                            <div class="form-field">
+                                <label for="bulk-status">Status</label>
+                                <select id="bulk-status">
+                                    <option value="in_benutzung">In Benutzung</option>
+                                    <option value="reserve">Reserve</option>
+                                    <option value="in_reparatur">In Reparatur</option>
+                                    <option value="zur_reinigung">Zur Reinigung</option>
+                                    <option value="ausgemustert">Ausgemustert</option>
+                                </select>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="object-form-section">
+                        <div class="form-section-heading"><span class="form-section-icon">🖼️</span><div><h3>Gemeinsames Bild</h3><p>Dieses Titelbild wird für alle Objekte der Sammelanlage übernommen.</p></div></div>
+                        <div class="form-field upload-field">
+                            <label for="bulk-title-image">Titelbild für alle Artikel</label>
+                            <input type="file" id="bulk-title-image" accept="image/*">
+                            <small>Optional. Die Datei wird nur einmal übertragen und intern für jedes Objekt hinterlegt.</small>
+                        </div>
+                    </section>
+
+                    <section class="object-form-section">
+                        <div class="form-section-heading">
+                            <span class="form-section-icon">🔢</span>
+                            <div><h3>Seriennummern</h3><p>Prefix, Startnummer und Stellenzahl werden automatisch kombiniert.</p></div>
+                        </div>
+                        <label class="standard-inspection-toggle" for="bulk-generate-serials">
+                            <input type="checkbox" id="bulk-generate-serials" checked onchange="toggleBulkSerialSettings()">
+                            <span><strong>Fortlaufende Seriennummern erzeugen</strong><small>Beispiel: C-001 bis C-030</small></span>
+                        </label>
+                        <div id="bulk-serial-settings" class="form-grid bulk-serial-grid">
+                            <div class="form-field"><label for="bulk-serial-prefix">Prefix</label><input type="text" id="bulk-serial-prefix" value="" placeholder="z. B. C-"></div>
+                            <div class="form-field"><label for="bulk-serial-start">Startnummer</label><input type="number" id="bulk-serial-start" min="0" value="1" required></div>
+                            <div class="form-field"><label for="bulk-serial-padding">Stellenzahl</label><input type="number" id="bulk-serial-padding" min="0" max="12" value="3" required><small>3 ergibt 001, 002, 003 …</small></div>
+                            <div class="form-field"><label for="bulk-serial-suffix">Suffix</label><input type="text" id="bulk-serial-suffix" placeholder="Optional"></div>
+                        </div>
+                    </section>
+
+                    <section class="object-form-section">
+                        <div class="form-section-heading">
+                            <span class="form-section-icon">🗓️</span>
+                            <div><h3>Prüfungen</h3><p>Die gleichen Prüffristen werden für jedes Objekt angelegt.</p></div>
+                        </div>
+                        <label class="standard-inspection-toggle" for="bulk-inspection-required">
+                            <input type="checkbox" id="bulk-inspection-required" checked onchange="toggleBulkInspectionSettings()">
+                            <span><strong>Prüfung für diese Artikel erforderlich</strong><small>Bei Deaktivierung werden keine Prüffristen angelegt.</small></span>
+                        </label>
+                        <div id="bulk-inspection-settings" class="maintenance-schedules-field">
+                            <div class="maintenance-schedules-heading">
+                                <div><label>Prüffristen</label><small>Bis zu drei verschiedene Fristen.</small></div>
+                                <button type="button" id="bulk-add-maintenance" class="btn-inline-add" onclick="addBulkMaintenanceSchedule()">＋ Frist</button>
+                            </div>
+                            <div id="bulk-maintenance-schedules" class="maintenance-schedule-list"></div>
+                            <div id="bulk-maintenance-limit" class="field-help"></div>
+                        </div>
+                    </section>
+
+                    <section class="object-form-section">
+                        <div class="form-section-heading"><span class="form-section-icon">📝</span><div><h3>Zusatzinformationen</h3><p>Optional für alle Artikel.</p></div></div>
+                        <div class="form-grid">
+                            <div class="form-field form-field-wide"><label for="bulk-info">Infotext</label><textarea id="bulk-info" rows="2"></textarea></div>
+                            <div class="form-field form-field-wide"><label for="bulk-hints">Hinweise zur Benutzung</label><textarea id="bulk-hints" rows="2"></textarea></div>
+                        </div>
+                    </section>
+                    <div class="form-actions object-form-actions">
+                        <button type="button" class="btn-secondary" onclick="navigateBack('dashboard')">Abbrechen</button>
+                        <button type="submit" class="btn-primary">Voransicht prüfen</button>
+                    </div>
+                </form>
+                <section id="bulk-preview-section" class="object-form-section bulk-preview-section hidden">
+                    <div class="form-section-heading"><span class="form-section-icon">✅</span><div><h3>Voransicht</h3><p id="bulk-preview-summary"></p></div></div>
+                    <div id="bulk-preview-warnings"></div>
+                    <div id="bulk-preview-list" class="table-container"></div>
+                    <div class="form-actions">
+                        <button type="button" class="btn-secondary" onclick="document.getElementById('bulk-preview-section').classList.add('hidden')">Zurück bearbeiten</button>
+                        <button type="button" id="bulk-create-button" class="btn-primary" onclick="createBulkObjects()">Objekte jetzt anlegen</button>
+                    </div>
+                </section>
+            </div>
+
             <!-- Object Form -->
-            <div id="view-edit-object" class="view hidden">
-                <h2 id="form-title">Objekt anlegen</h2>
+            <div id="view-edit-object" class="view hidden object-editor">
+                <div class="object-form-intro">
+                    <span class="form-eyebrow">Inventar erfassen</span>
+                    <h2 id="form-title">Objekt anlegen</h2>
+                    <p>Pflichtfelder zuerst ausfüllen, Details und Dateien können anschließend ergänzt werden.</p>
+                </div>
                 <form id="object-form" onsubmit="saveObject(event)">
                     <input type="hidden" id="edit-object-id">
-                    <div class="form-grid">
-                        <div>
-                            <label>Bezeichnung *</label>
-                            <input type="text" id="obj-designation" required>
+                    <div id="object-form-message" class="form-message hidden" role="alert"></div>
+
+                    <section class="object-form-section">
+                        <div class="form-section-heading">
+                            <span class="form-section-icon">📦</span>
+                            <div><h3>Grunddaten</h3><p>Was wird inventarisiert?</p></div>
                         </div>
-                        <div>
-                            <label>Typ *</label>
-                            <select id="obj-type" required></select>
-                        </div>
-                        <div>
-                            <label>Hersteller <button type="button" class="btn-small" onclick="showAddManufacturer()">+</button></label>
-                            <select id="obj-manufacturer"><option value="">-- Auswählen --</option></select>
-                            <div id="add-manufacturer-box" class="hidden inline-add-box">
-                                <input type="text" id="new-manufacturer" placeholder="Neuer Hersteller...">
-                                <button type="button" class="btn-small" onclick="saveNewManufacturer()">Hinzufügen</button>
+                        <div class="form-grid">
+                            <div class="form-field form-field-wide">
+                                <label for="obj-designation">Bezeichnung <span class="required-mark">*</span></label>
+                                <input type="text" id="obj-designation" placeholder="z. B. C-Schlauch 20 m" autocomplete="off" required>
+                            </div>
+                            <div class="form-field">
+                                <label for="obj-type">Kategorie <span class="required-mark">*</span></label>
+                                <select id="obj-type" required></select>
+                            </div>
+                            <div class="form-field">
+                                <div class="field-label-row">
+                                    <label for="obj-manufacturer">Hersteller</label>
+                                    <button id="toggle-manufacturer" type="button" class="btn-inline-add" onclick="showAddManufacturer()" aria-expanded="false">＋ Neu</button>
+                                </div>
+                                <select id="obj-manufacturer"><option value="">-- Nicht angegeben --</option></select>
+                                <div id="add-manufacturer-box" class="hidden inline-add-box">
+                                    <strong>Hersteller anlegen</strong>
+                                    <input type="text" id="new-manufacturer" placeholder="Name des Herstellers" autocomplete="off">
+                                    <div id="manufacturer-feedback" class="inline-feedback hidden" role="status"></div>
+                                    <div class="inline-add-actions">
+                                        <button type="button" class="btn-secondary btn-small" onclick="hideInlineAdd('manufacturer')">Abbrechen</button>
+                                        <button type="button" class="btn-primary btn-small" onclick="saveNewManufacturer()">Hinzufügen</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-field">
+                                <div class="field-label-row">
+                                    <label for="obj-supplier">Lieferant</label>
+                                    <button id="toggle-supplier" type="button" class="btn-inline-add" onclick="showAddSupplier()" aria-expanded="false">＋ Neu</button>
+                                </div>
+                                <select id="obj-supplier"><option value="">-- Nicht angegeben --</option></select>
+                                <div id="add-supplier-box" class="hidden inline-add-box">
+                                    <strong>Lieferant anlegen</strong>
+                                    <input type="text" id="new-supplier" placeholder="Name des Lieferanten" autocomplete="off">
+                                    <div id="supplier-feedback" class="inline-feedback hidden" role="status"></div>
+                                    <div class="inline-add-actions">
+                                        <button type="button" class="btn-secondary btn-small" onclick="hideInlineAdd('supplier')">Abbrechen</button>
+                                        <button type="button" class="btn-primary btn-small" onclick="saveNewSupplier()">Hinzufügen</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-field">
+                                <label for="obj-acquisition">Anschaffungsdatum</label>
+                                <input type="date" id="obj-acquisition">
+                            </div>
+                            <div class="form-field">
+                                <label for="obj-serial">Seriennummer</label>
+                                <div class="input-with-action">
+                                    <input type="text" id="obj-serial" placeholder="Optional" autocomplete="off">
+                                    <button type="button" class="btn-scan-field" onclick="scanSerialNumber()" aria-label="Seriennummer mit der Kamera scannen">📷 <span>Scannen</span></button>
+                                </div>
+                                <small class="field-help">QR-Code oder gängigen Barcode mit der Kamera erfassen.</small>
+                                <div id="serial-scan-feedback" class="inline-feedback hidden" role="status"></div>
                             </div>
                         </div>
-                        <div>
-                            <label>Seriennummer</label>
-                            <input type="text" id="obj-serial">
+                    </section>
+
+                    <section class="object-form-section">
+                        <div class="form-section-heading">
+                            <span class="form-section-icon">📍</span>
+                            <div><h3>Standort und Status</h3><p>Wo befindet sich das Objekt aktuell?</p></div>
                         </div>
-                        <div>
-                            <label>Unterbringung <button type="button" class="btn-small" onclick="showAddLocation()">+</button></label>
-                            <select id="obj-location"><option value="">-- Auswählen --</option></select>
-                            <div id="add-location-box" class="hidden inline-add-box">
-                                <input type="text" id="new-location" placeholder="Neuer Standort...">
-                                <input type="text" id="new-location-type" placeholder="Typ (z.B. Fahrzeug, Raum)..." value="Standort">
-                                <select id="new-location-parent"><option value="">-- Kein Übergeordneter --</option></select>
-                                <button type="button" class="btn-small" onclick="saveNewLocation()">Hinzufügen</button>
+                        <div class="form-grid">
+                            <div class="form-field form-field-wide">
+                                <div class="field-label-row">
+                                    <span class="field-label">Unterbringung</span>
+                                    <button id="toggle-location" type="button" class="btn-inline-add" onclick="showAddLocation()" aria-expanded="false">＋ Neu</button>
+                                </div>
+                                <select id="obj-location" class="hidden" aria-hidden="true" tabindex="-1"><option value="">-- Kein Standort --</option></select>
+                                <div class="location-cascade" aria-label="Lagerplatz stufenweise auswählen">
+                                    <div id="obj-location-levels" class="location-cascade-levels"></div>
+                                    <div id="obj-location-summary" class="location-selection-summary">Noch kein Lagerplatz ausgewählt.</div>
+                                </div>
+                                <div id="add-location-box" class="hidden inline-add-box">
+                                    <strong>Standort anlegen</strong>
+                                    <input type="text" id="new-location" placeholder="Name, z. B. Geräteraum 1" autocomplete="off">
+                                    <div class="inline-form-grid">
+                                        <input type="text" id="new-location-type" placeholder="Art, z. B. Raum" value="Standort">
+                                        <select id="new-location-parent"><option value="">-- Kein übergeordneter Standort --</option></select>
+                                    </div>
+                                    <div id="location-feedback" class="inline-feedback hidden" role="status"></div>
+                                    <div class="inline-add-actions">
+                                        <button type="button" class="btn-secondary btn-small" onclick="hideInlineAdd('location')">Abbrechen</button>
+                                        <button type="button" class="btn-primary btn-small" onclick="saveNewLocation()">Hinzufügen</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-field">
+                                <label for="obj-status">Status</label>
+                                <select id="obj-status">
+                                    <option value="in_benutzung">In Benutzung</option>
+                                    <option value="in_reparatur">In Reparatur</option>
+                                    <option value="ausgemustert">Ausgemustert</option>
+                                    <option value="reserve">Reserve</option>
+                                    <option value="zur_reinigung">Zur Reinigung</option>
+                                </select>
+                            </div>
+                            <div id="vehicle-location-box" class="hidden form-field-wide vehicle-hint">
+                                🚒 Das Fahrzeug wird automatisch auch als Standort angelegt, damit ihm Ausrüstung zugeordnet werden kann.
                             </div>
                         </div>
-                        <div>
-                            <label>Status</label>
-                            <select id="obj-status">
-                                <option value="in_benutzung">In Benutzung</option>
-                                <option value="in_reparatur">In Reparatur</option>
-                                <option value="ausgemustert">Ausgemustert</option>
-                                <option value="reserve">Reserve</option>
-                                <option value="zur_reinigung">Zur Reinigung</option>
-                            </select>
+                    </section>
+
+                    <section class="object-form-section">
+                        <div class="form-section-heading">
+                            <span class="form-section-icon">🗓️</span>
+                            <div><h3>Prüfung</h3><p>Prüfpflicht und Prüfintervall festlegen.</p></div>
                         </div>
-                        <div id="vehicle-location-box" class="hidden">
-                            <label style="color:#1976d2; font-weight:500;">
-                                🚒 Fahrzeuge werden automatisch als Standort angelegt (z.B. für Geräte auf dem Fahrzeug)
-                            </label>
+                        <div class="form-grid">
+                            <div class="form-field form-field-wide inspection-master-setting">
+                                <label class="standard-inspection-toggle" for="obj-inspection-required">
+                                    <input type="checkbox" id="obj-inspection-required" checked onchange="toggleInspectionRequiredSettings()">
+                                    <span>
+                                        <strong>Prüfung für diesen Artikel erforderlich</strong>
+                                        <small>Deaktivieren, wenn der Artikel keine regelmäßige Prüfung benötigt.</small>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="form-field form-field-wide inspection-dependent-setting maintenance-schedules-field">
+                                <div class="maintenance-schedules-heading">
+                                    <div>
+                                        <label>Prüffristen</label>
+                                        <small>Bis zu drei unterschiedliche Fristen je Artikel, z. B. TÜV und Sicherheitsprüfung.</small>
+                                    </div>
+                                    <button type="button" id="add-maintenance-schedule" class="btn-inline-add" onclick="addMaintenanceSchedule()">＋ Frist</button>
+                                </div>
+                                <div id="obj-maintenance-schedules" class="maintenance-schedule-list" aria-live="polite"></div>
+                                <div id="maintenance-schedule-limit" class="field-help">Noch 2 weitere Prüffristen möglich.</div>
+                            </div>
+                            <div class="form-field form-field-wide standard-inspection-setting inspection-dependent-setting">
+                                <label class="standard-inspection-toggle" for="obj-standard-inspection-enabled">
+                                    <input type="checkbox" id="obj-standard-inspection-enabled" onchange="toggleStandardInspectionSettings()">
+                                    <span>
+                                        <strong>Prüfung für Standardnutzer anzeigen</strong>
+                                        <small>Aktiviert auf der Geräteseite die Prüfung mit genau einer festgelegten Prüfkarte.</small>
+                                    </span>
+                                </label>
+                                <div id="obj-standard-inspection-template-box" class="standard-inspection-template-box hidden">
+                                    <label for="obj-standard-inspection-template">Prüfkarte für Standardnutzer <span class="required-mark">*</span></label>
+                                    <select id="obj-standard-inspection-template">
+                                        <option value="">-- Prüfkarte auswählen --</option>
+                                    </select>
+                                    <small>Berechtigte Nutzer können am selben Artikel weiterhin jede andere Prüfkarte frei wählen.</small>
+                                </div>
+                            </div>
                         </div>
-                        <div>
-                            <label>Anschaffungsdatum</label>
-                            <input type="date" id="obj-acquisition">
+                    </section>
+
+                    <section class="object-form-section">
+                        <div class="form-section-heading">
+                            <span class="form-section-icon">📝</span>
+                            <div><h3>Beschreibung</h3><p>Optionale Informationen für die spätere Nutzung.</p></div>
                         </div>
-                        <div>
-                            <label>Prüfintervall (Tage)</label>
-                            <input type="number" id="obj-maint-days" min="1">
+                        <div class="form-grid">
+                            <div class="form-field form-field-wide">
+                                <label for="obj-info">Infotext</label>
+                                <textarea id="obj-info" rows="3" placeholder="Technische Daten oder allgemeine Informationen"></textarea>
+                            </div>
+                            <div class="form-field form-field-wide">
+                                <label for="obj-hints">Hinweise zur Benutzung</label>
+                                <textarea id="obj-hints" rows="3" placeholder="Bedienung, Sicherheit oder praktische Tipps"></textarea>
+                            </div>
                         </div>
-                    </div>
-                    <div>
-                        <label>Infotext</label>
-                        <textarea id="obj-info" rows="4"></textarea>
-                    </div>
-                    <div>
-                        <label>Hinweise / Tipps zur Benutzung</label>
-                        <textarea id="obj-hints" rows="3"></textarea>
-                    </div>
-                    <div>
-                        <label>Prüfnotizen / Hinweise</label>
-                        <textarea id="obj-maint-notes" rows="2"></textarea>
-                    </div>
-                    <div>
-                        <label>Titelbild</label>
-                        <input type="file" id="obj-title-image" accept="image/*">
-                    </div>
-                    <div>
-                        <label>Dokumente hochladen (PDF, Bilder, Text)</label>
-                        <input type="file" id="obj-documents" multiple accept=".pdf,.txt,.md,image/*">
-                        <small>Mehrfachauswahl möglich</small>
-                    </div>
-                    <div class="form-actions">
-                        <button type="button" class="btn-secondary" onclick="showView('search')">Abbrechen</button>
-                        <button type="submit" class="btn-primary">Speichern</button>
+                    </section>
+
+                    <section class="object-form-section">
+                        <div class="form-section-heading">
+                            <span class="form-section-icon">📎</span>
+                            <div><h3>Bilder und Dokumente</h3><p>Direkt fotografieren oder vorhandene Dateien auswählen.</p></div>
+                        </div>
+                        <div class="form-grid">
+                            <div class="form-field upload-field">
+                                <label for="obj-title-image">Titelbild</label>
+                                <input type="file" id="obj-title-image" accept="image/*">
+                                <small>Foto oder Bilddatei</small>
+                            </div>
+                            <div class="form-field upload-field">
+                                <label for="obj-documents">Weitere Dokumente</label>
+                                <input type="file" id="obj-documents" multiple accept=".pdf,.txt,.md,image/*">
+                                <label for="obj-document-label" class="secondary-upload-label">Label für diese Dokumente</label>
+                                <select id="obj-document-label"><option value="">-- Label auswählen --</option></select>
+                                <small>PDF, Bilder oder Textdateien; bei mehreren Dateien gilt das gewählte Label für alle.</small>
+                            </div>
+                        </div>
+                    </section>
+
+                    <div class="form-actions object-form-actions">
+                        <button type="button" class="btn-secondary" onclick="navigateBack('search')">Abbrechen</button>
+                        <button type="submit" class="btn-primary">Objekt speichern</button>
                     </div>
                 </form>
             </div>
@@ -239,13 +741,15 @@
             <div id="view-admin" class="view hidden">
                 <h2>Verwaltung</h2>
                 <div class="admin-tabs">
-                    <button class="admin-tab active" onclick="showAdminTab('users')">Benutzer</button>
-                    <button class="admin-tab" onclick="showAdminTab('masterdata')">Stammdaten</button>
-                    <button class="admin-tab" onclick="showAdminTab('inspections')">Prüfkarten</button>
-                    <button class="admin-tab" onclick="showAdminTab('qrlogin')">QR-Login</button>
-                    <button class="admin-tab" onclick="showAdminTab('importexport')">Import/Export</button>
-                    <button class="admin-tab" onclick="showAdminTab('log')">Meldungs-Log</button>
-                    <button class="admin-tab" onclick="showAdminTab('archive')">Prüfarchiv</button>
+                    <button class="admin-tab active" onclick="showAdminTab('users', this)">Benutzer</button>
+                    <button class="admin-tab" onclick="showAdminTab('masterdata', this)">Stammdaten</button>
+                    <button class="admin-tab" onclick="showAdminTab('locations', this)">Standorte</button>
+                    <button class="admin-tab" onclick="showAdminTab('inspections', this)">Prüfkarten</button>
+                    <button class="admin-tab" onclick="showAdminTab('qrlogin', this)">QR-Login</button>
+                    <button class="admin-tab" onclick="showAdminTab('importexport', this)">Import/Export</button>
+                    <button class="admin-tab" onclick="showAdminTab('log', this)">Meldungs-Log</button>
+                    <button class="admin-tab" onclick="showAdminTab('archive', this)">Prüfarchiv</button>
+                    <button class="admin-tab" onclick="showAdminTab('api', this)">API</button>
                 </div>
                 <div id="admin-users" class="admin-panel">
                     <button class="btn-primary" onclick="showUserForm()">+ Benutzer</button>
@@ -254,7 +758,43 @@
                 <div id="admin-masterdata" class="admin-panel hidden">
                     <h3>Hersteller</h3>
                     <div id="manufacturers-list"></div>
-                    <h3>Standorte</h3>
+                    <h3>Lieferanten</h3>
+                    <div id="suppliers-list"></div>
+                </div>
+                <div id="admin-locations" class="admin-panel hidden location-admin-panel">
+                    <div class="location-admin-heading">
+                        <div>
+                            <span class="form-eyebrow">Standortstruktur</span>
+                            <h3>Standorte verwalten</h3>
+                            <p>Hauptstandort und Unterbereiche stufenweise auswählen und erweitern.</p>
+                        </div>
+                    </div>
+                    <div class="location-admin-create-card">
+                        <h4>Neuen Standort anlegen</h4>
+                        <div class="location-admin-form-grid">
+                            <div>
+                                <label for="new-location-admin">Name <span class="required-mark">*</span></label>
+                                <input type="text" id="new-location-admin" placeholder="z. B. Geräteraum 1" autocomplete="off">
+                            </div>
+                            <div>
+                                <label for="new-location-type-admin">Art des Standorts</label>
+                                <input type="text" id="new-location-type-admin" placeholder="z. B. Fahrzeug, Raum oder Fach" autocomplete="off">
+                            </div>
+                            <div class="location-admin-parent-field">
+                                <span class="location-admin-parent-label">Übergeordneter Standort</span>
+                                <input type="hidden" id="new-location-parent-admin">
+                                <div class="location-cascade" aria-label="Übergeordneten Standort stufenweise auswählen">
+                                    <div id="admin-location-parent-levels" class="location-cascade-levels"></div>
+                                    <div id="admin-location-parent-summary" class="location-selection-summary">Der neue Standort wird auf der Hauptebene angelegt.</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="admin-location-feedback" class="inline-feedback hidden" role="status"></div>
+                        <div class="location-admin-actions">
+                            <button type="button" class="btn-primary" onclick="addLocationAdmin()">＋ Standort anlegen</button>
+                        </div>
+                    </div>
+                    <h3 class="location-tree-heading">Bestehende Standortstruktur</h3>
                     <div id="locations-list"></div>
                 </div>
                 <div id="admin-inspections" class="admin-panel hidden">
@@ -273,18 +813,20 @@
                                     <label>Zugeordnete Kategorie</label>
                                     <select id="tmpl-type"><option value="">-- Alle Kategorien --</option></select>
                                 </div>
+                                <div>
+                                    <label for="tmpl-default-interval">Standardintervall für nächsten Termin</label>
+                                    <div class="input-with-suffix"><input type="number" id="tmpl-default-interval" min="1" max="36500" inputmode="numeric" placeholder="z. B. 1"><span>Tage</span></div>
+                                    <small class="field-help">Wird verwendet, wenn keine Artikel-Prüffrist zurückgesetzt wird.</small>
+                                </div>
                                 <div style="grid-column: 1 / -1;">
                                     <label>Beschreibung</label>
                                     <textarea id="tmpl-desc" rows="2" placeholder="z.B. Prüfung nach DIN 14406"></textarea>
                                 </div>
                             </div>
-                            <div style="padding:0.5rem 0;">
-                                <label for="tmpl-allow-standard" style="display:inline-flex !important; align-items:center; gap:0.4rem; font-weight:500; color:#1976d2; cursor:pointer; margin:0 !important; padding:0 !important;">
-                                    <input type="checkbox" id="tmpl-allow-standard" style="margin:0; cursor:pointer;">
-                                    Für Standardnutzer sichtbar (z.B. tägliche Fahrzeugprüfung)
-                                </label>
+                            <div class="inspection-fixed-field-note">
+                                <strong>Festes Pflichtfeld:</strong> „Name Prüfer“ wird jeder Prüfkarte automatisch vorangestellt.
                             </div>
-                            <h4>Prüffelder</h4>
+                            <h4>Weitere Prüffelder</h4>
                             <div id="tmpl-fields-list"></div>
                             <button type="button" class="btn-secondary" onclick="addTemplateField()">+ Feld hinzufügen</button>
                             <div class="form-actions">
@@ -332,7 +874,7 @@
                         <p style="font-size:0.85rem; margin:0;">
                             Die CSV-Datei muss als Trennzeichen <strong>Semikolon (;)</strong> verwenden.<br>
                             Die erste Zeile ist der Header und wird übersprungen.<br><br>
-                            <strong>Spalten:</strong> Bezeichnung; Typ; Seriennummer; Hersteller; Standort; Infotext; Hinweise; Anschaffungsdatum; Status; Prüfintervall_Tage; Prüfnotizen<br><br>
+                            <strong>Spalten:</strong> Bezeichnung; Typ; Seriennummer; Hersteller; Lieferant; Standort; Infotext; Hinweise; Anschaffungsdatum; Status; Prüfung_erforderlich; Prüfintervall_Tage; Prüfnotizen; Prüffrist_1_Bezeichnung; Prüffrist_1_Intervall_Tage; Prüffrist_1_Nächster_Termin; Prüffrist_1_Hinweise; … bis Prüffrist 3<br><br>
                             <strong>Standort:</strong> Untergeordnete Standorte mit <code>&gt;</code> trennen (z.B. <code>Gerätehaus &gt; Halle 1</code>). Wenn leer, wird automatisch <code>Gerätehaus</code> verwendet.<br><br>
                             <strong>Beispiel:</strong><br>
                             <code style="background:#f5f5f5; padding:2px 6px; border-radius:4px; font-size:0.8rem;">
@@ -385,6 +927,43 @@
                         </p>
                     </div>
                 </div>
+                <div id="admin-api" class="admin-panel hidden api-admin-panel">
+                    <div class="location-admin-heading">
+                        <div>
+                            <span class="form-eyebrow">Externe Anbindung</span>
+                            <h3>API-Schlüssel</h3>
+                            <p>Schlüssel für externe Programme oder eine lokale KI. Der vollständige Schlüssel wird nur einmal nach dem Erstellen angezeigt.</p>
+                        </div>
+                    </div>
+                    <form id="api-client-form" class="api-client-form" onsubmit="createApiClient(event)">
+                        <div class="form-field">
+                            <label for="api-client-name">Name der Anwendung <span class="required-mark">*</span></label>
+                            <input id="api-client-name" type="text" maxlength="120" placeholder="z. B. Lokale KI" required>
+                        </div>
+                        <fieldset class="api-scope-fieldset">
+                            <legend>Berechtigungen</legend>
+                            <label><input id="api-scope-read" type="checkbox" checked> Objekte lesen</label>
+                            <label><input id="api-scope-write" type="checkbox"> Objekte anlegen</label>
+                        </fieldset>
+                        <button class="btn-primary" type="submit">＋ API-Schlüssel erstellen</button>
+                    </form>
+                    <div id="api-key-reveal" class="api-key-reveal hidden" role="status">
+                        <strong>Neuer Schlüssel – jetzt sicher kopieren:</strong>
+                        <code id="api-key-value"></code>
+                        <button type="button" class="btn-secondary btn-small" onclick="copyApiKey()">Kopieren</button>
+                        <p>Nach dem Verlassen dieser Ansicht kann der Schlüssel nicht erneut angezeigt werden.</p>
+                    </div>
+                    <div class="api-doc-hint">
+                        <strong>Endpunkte:</strong>
+                        <code>GET /api/v1/meta</code>
+                        <code>GET /api/v1/objects</code>
+                        <code>GET /api/v1/objects/{FFW-Nummer oder Seriennummer}</code>
+                        <code>POST /api/v1/objects</code>
+                        <small>Authentifizierung über den HTTP-Header <code>X-API-Key</code>. Die interaktive Dokumentation ist unter <a href="/docs" target="_blank" rel="noopener">/docs</a> verfügbar.</small>
+                    </div>
+                    <h3>Vorhandene Schlüssel</h3>
+                    <div id="api-clients-list" class="table-container"></div>
+                </div>
             </div>
         </main>
     </div>
@@ -395,6 +974,32 @@
             <span class="close" onclick="closeViewInspectionModal()">&times;</span>
             <h2 id="view-inspection-title">Prüfung</h2>
             <div id="view-inspection-body"></div>
+        </div>
+    </div>
+
+    <div id="inspection-image-marker-modal" class="modal inspection-image-marker-modal">
+        <div class="modal-content inspection-image-marker-content">
+            <button type="button" class="close modal-close-button" onclick="closeInspectionImageMarker()" aria-label="Bildmarkierung schließen">&times;</button>
+            <h2>Hinweis im Bild markieren</h2>
+            <p class="modal-intro">Mit dem Finger oder der Maus vom Startpunkt zur gewünschten Stelle ziehen. Es können mehrere Pfeile gesetzt werden.</p>
+            <fieldset class="inspection-marker-color-picker">
+                <legend>Pfeilfarbe</legend>
+                <button type="button" class="inspection-marker-color active" data-marker-color="#e00000" onclick="setInspectionArrowColor('#e00000')" aria-pressed="true">
+                    <span class="inspection-color-dot red" aria-hidden="true"></span> Rot
+                </button>
+                <button type="button" class="inspection-marker-color" data-marker-color="#111111" onclick="setInspectionArrowColor('#111111')" aria-pressed="false">
+                    <span class="inspection-color-dot black" aria-hidden="true"></span> Schwarz
+                </button>
+            </fieldset>
+            <div class="inspection-marker-canvas-wrap">
+                <canvas id="inspection-marker-canvas"></canvas>
+            </div>
+            <div class="inspection-marker-actions">
+                <button type="button" class="btn-secondary" onclick="undoInspectionArrow()">↶ Letzten Pfeil entfernen</button>
+                <button type="button" class="btn-secondary" onclick="clearInspectionArrows()">Alle entfernen</button>
+                <button type="button" class="btn-secondary" onclick="closeInspectionImageMarker()">Abbrechen</button>
+                <button type="button" class="btn-primary" onclick="applyInspectionImageMarker()">Markierung übernehmen</button>
+            </div>
         </div>
     </div>
 
@@ -417,12 +1022,97 @@
         </div>
     </div>
 
+    <!-- User Create/Edit Modal -->
+    <div id="user-modal" class="modal">
+        <div class="modal-content user-modal-content">
+            <button type="button" class="close modal-close-button" onclick="closeUserForm()" aria-label="Benutzerfenster schließen">&times;</button>
+            <span class="form-eyebrow">Benutzerverwaltung</span>
+            <h2 id="user-modal-title">Benutzer anlegen</h2>
+            <p class="modal-intro">Zugangsdaten und Funktion gemeinsam erfassen.</p>
+            <form id="user-form" onsubmit="saveUser(event)">
+                <input type="hidden" id="user-edit-id">
+                <div id="user-form-message" class="form-message hidden" role="alert"></div>
+                <div class="form-grid user-form-grid">
+                    <div>
+                        <label for="user-username">Benutzername *</label>
+                        <input type="text" id="user-username" required autocomplete="username" placeholder="z. B. max.mustermann">
+                    </div>
+                    <div>
+                        <label for="user-full-name">Name *</label>
+                        <input type="text" id="user-full-name" required autocomplete="name" placeholder="Vor- und Nachname">
+                    </div>
+                    <div>
+                        <label for="user-email">E-Mail</label>
+                        <input type="email" id="user-email" autocomplete="email" placeholder="Optional">
+                    </div>
+                    <div>
+                        <label for="user-role">Funktion *</label>
+                        <select id="user-role" required>
+                            <option value="standard">Standardnutzer</option>
+                            <option value="erweitert">Erweiterter Nutzer</option>
+                            <option value="verwaltung">Verwaltung</option>
+                            <option value="admin">Administrator</option>
+                        </select>
+                    </div>
+                    <div class="form-field-wide">
+                        <label for="user-password"><span id="user-password-label">Passwort *</span></label>
+                        <input type="password" id="user-password" autocomplete="new-password" minlength="6" placeholder="Mindestens 6 Zeichen">
+                        <small id="user-password-help" class="field-help">Das Passwort wird zum ersten Anmelden benötigt.</small>
+                    </div>
+                </div>
+                <label class="checkbox-row" for="user-active">
+                    <input type="checkbox" id="user-active" checked>
+                    Benutzerkonto ist aktiv
+                </label>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeUserForm()">Abbrechen</button>
+                    <button type="submit" class="btn-primary" id="user-save-button">Benutzer speichern</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Object Quick Update Modal -->
+    <div id="quick-update-modal" class="modal">
+        <div class="modal-content quick-update-modal-content">
+            <button type="button" class="close modal-close-button" onclick="closeQuickUpdate()" aria-label="Fenster schließen">&times;</button>
+            <span class="form-eyebrow">Schnellaktion</span>
+            <h2>Standort und Status ändern</h2>
+            <p id="quick-update-object" class="modal-intro"></p>
+            <form id="quick-update-form" onsubmit="saveQuickUpdate(event)">
+                <input type="hidden" id="quick-update-object-id">
+                <div class="form-grid">
+                    <div>
+                        <label for="quick-update-location">Standort</label>
+                        <select id="quick-update-location"></select>
+                    </div>
+                    <div>
+                        <label for="quick-update-status">Status</label>
+                        <select id="quick-update-status">
+                            <option value="in_benutzung">In Benutzung</option>
+                            <option value="in_reparatur">In Reparatur</option>
+                            <option value="ausgemustert">Ausgemustert</option>
+                            <option value="reserve">Reserve</option>
+                            <option value="zur_reinigung">Zur Reinigung</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="quick-update-message" class="form-message hidden" role="alert"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeQuickUpdate()">Abbrechen</button>
+                    <button type="submit" class="btn-primary">Änderung speichern</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Message Modal -->
     <div id="message-modal" class="modal">
-        <div class="modal-content" style="max-width:600px;">
+        <div class="modal-content message-modal-content">
             <span class="close" onclick="closeMessageModal()">&times;</span>
             <h2>📝 Neue Meldung</h2>
             <form id="message-form" onsubmit="saveMessage(event)">
+                <input type="hidden" id="msg-object-id">
                 <div class="form-grid">
                     <div>
                         <label>Typ *</label>
@@ -469,15 +1159,34 @@
                     <label>Beschreibung</label>
                     <textarea id="msg-description" rows="3" placeholder="Details zur Meldung..."></textarea>
                 </div>
+                <section class="inspection-evidence-section message-evidence-section">
+                    <div class="inspection-evidence-heading">
+                        <div>
+                            <h3>📷 Schadens- und Hinweisbilder</h3>
+                            <p>Optional. Zu jedem Bild ist ein Kommentar erforderlich.</p>
+                        </div>
+                        <div class="inspection-image-source-actions" aria-label="Schadensbild hinzufügen">
+                            <button type="button" class="btn-secondary" onclick="document.getElementById('message-camera-input').click()">📷 Bild aufnehmen</button>
+                            <button type="button" class="btn-secondary" onclick="document.getElementById('message-upload-input').click()">⬆ Bild hochladen</button>
+                        </div>
+                        <input id="message-camera-input" class="hidden" type="file" accept="image/*" capture="environment" onchange="addMessageImages(this)">
+                        <input id="message-upload-input" class="hidden" type="file" accept="image/*" multiple onchange="addMessageImages(this)">
+                    </div>
+                    <div id="message-pending-images" class="inspection-image-list"></div>
+                </section>
                 <div>
-                    <label>Maßnahme</label>
-                    <select id="msg-action">
-                        <option value="sonstiges">-- Auswählen --</option>
-                        <option value="ausser_betrieb">Gerät außer Betrieb</option>
+                    <label for="msg-action">Maßnahme</label>
+                    <select id="msg-action" onchange="toggleMessageActionComment()">
+                        <option value="keine" selected>Keine</option>
                         <option value="auf_fahrzeug">Aktuell auf Fahrzeug verladen</option>
+                        <option value="in_werkstatt">In Werkstatt abgestellt</option>
                         <option value="entsorgt">Entsorgt</option>
-                        <option value="sonstiges">Sonstiges</option>
+                        <option value="sonstiges">Sonstiges (Kommentar)</option>
                     </select>
+                </div>
+                <div id="msg-action-comment-box" class="hidden">
+                    <label for="msg-action-comment">Sonstige Maßnahme <span class="required-mark">*</span></label>
+                    <textarea id="msg-action-comment" rows="2" maxlength="1000" placeholder="Sonstige Maßnahme kurz beschreiben"></textarea>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn-secondary" onclick="closeMessageModal()">Abbrechen</button>
@@ -487,6 +1196,82 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js"></script>
+    <!-- Message history / status modal -->
+    <div id="message-history-modal" class="modal">
+        <div class="modal-content message-history-modal-content">
+            <button type="button" class="close modal-close-button" onclick="closeMessageHistoryModal()" aria-label="Verlaufsfenster schließen">&times;</button>
+            <span class="form-eyebrow">Meldungsverlauf</span>
+            <h2 id="message-history-modal-title">Status dokumentieren</h2>
+            <p id="message-history-modal-intro" class="modal-intro">Ort, Firma und voraussichtliches Enddatum werden dauerhaft gespeichert.</p>
+            <form id="message-history-form" onsubmit="saveMessageHistoryEntry(event)">
+                <input type="hidden" id="message-history-message-id">
+                <input type="hidden" id="message-history-mode">
+                <input type="hidden" id="message-history-close-state">
+                <div id="message-history-status-box">
+                    <label for="message-history-status">Neuer Status</label>
+                    <select id="message-history-status">
+                        <option value="in_bearbeitung">In Bearbeitung</option>
+                        <option value="in_klaerung">In Klärung</option>
+                        <option value="zur_reparatur">Zur Reparatur</option>
+                        <option value="bedienungsfehler">Bedienungsfehler</option>
+                        <option value="nicht_mehr_aufgetreten">Fehler nicht mehr aufgetreten</option>
+                        <option value="geprueft_ok">Gerät geprüft u. in Ordnung</option>
+                        <option value="entsorgt">Entsorgt</option>
+                    </select>
+                </div>
+                <div>
+                    <label id="message-history-details-label" for="message-history-details">Ort / Firma / weiterer Hinweis</label>
+                    <textarea id="message-history-details" rows="3" maxlength="1500" placeholder="z. B. Fa. Welter, Gerät liegt in der Werkstatt"></textarea>
+                </div>
+                <div id="message-history-end-date-box">
+                    <label for="message-history-end-date">Voraussichtlich erledigt am</label>
+                    <input type="date" id="message-history-end-date">
+                </div>
+                <div>
+                    <label for="message-history-author">Name oder Kürzel *</label>
+                    <input type="text" id="message-history-author" maxlength="120" required placeholder="z. B. J. Guckert">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeMessageHistoryModal()">Abbrechen</button>
+                    <button type="submit" class="btn-primary" id="message-history-save-button">Eintrag speichern</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Meldung sicher aus der aktuellen Liste entfernen -->
+    <div id="message-archive-modal" class="modal">
+        <div class="modal-content message-history-modal-content">
+            <button type="button" class="close modal-close-button" onclick="closeMessageArchiveModal()" aria-label="Archivierungsfenster schließen">&times;</button>
+            <span class="form-eyebrow">Meldung archivieren</span>
+            <h2>Meldung aus „Aktuelle Meldungen“ entfernen</h2>
+            <p id="message-archive-notice" class="message-archive-notice">Die Meldung wird <strong>nicht gelöscht</strong>. Bilder und vollständiger Verlauf bleiben dauerhaft erhalten.</p>
+            <form id="message-archive-form" onsubmit="archiveMessage(event)">
+                <input type="hidden" id="message-archive-id">
+                <div>
+                    <label for="message-archive-resolution">Ergebnis *</label>
+                    <select id="message-archive-resolution" required>
+                        <option value="abgeschlossen">Abgeschlossen</option>
+                        <option value="entsorgt">Entsorgt</option>
+                        <option value="weiter_in_klaerung">Weiter in Klärung</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="message-archive-comment">Abschluss- oder Archivnotiz</label>
+                    <textarea id="message-archive-comment" rows="3" maxlength="1500" placeholder="Optionaler Hinweis zum Ergebnis"></textarea>
+                </div>
+                <div>
+                    <label for="message-archive-author">Name oder Kürzel des Abschließenden *</label>
+                    <input type="text" id="message-archive-author" maxlength="120" required placeholder="z. B. J. Guckert">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeMessageArchiveModal()">Abbrechen</button>
+                    <button type="submit" class="btn-primary btn-delete" id="message-archive-save-button">Aus aktuellen Meldungen entfernen</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js?v=45"></script>
 </body>
 </html>
