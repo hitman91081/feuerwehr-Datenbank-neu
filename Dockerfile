@@ -7,6 +7,7 @@ WORKDIR /app
 # Installiere System-Abhängigkeiten
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Kopiere Requirements und installiere Python-Abhängigkeiten
