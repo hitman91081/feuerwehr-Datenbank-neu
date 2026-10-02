@@ -1935,7 +1935,7 @@ def get_qr_login_sticker():
     <body>
         <div class="toolbar no-print">
             <div class="toolbar-actions">
-                <a href="/?v=47#admin">← Zurück zur Verwaltung</a>
+                <a href="/?v=48#admin">← Zurück zur Verwaltung</a>
                 <button onclick="window.print()">🖨️ Drucken</button>
             </div>
             <p>Empfohlene Aufkleber-Größe: 50 x 50 mm oder größer</p>
@@ -2078,6 +2078,121 @@ def get_sticker_pdf(object_id: int, layout: str = "qr-id", db: Session = Depends
     )
 
 
+@app.get("/api/objects/{object_id}/sticker/pdf-preview", response_class=HTMLResponse)
+def preview_sticker_pdf(object_id: int, layout: str = "qr-id", db: Session = Depends(get_db)):
+    """PDF-Vorschau mit eigener Navigation für installierte iOS-/Android-Web-Apps."""
+    obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden")
+    if layout not in {"qr-small", "qr-id", "qr-full", "barcode"}:
+        raise HTTPException(status_code=422, detail="Unbekannte Aufklebergröße")
+
+    from html import escape as html_escape
+    safe_number = html_escape(obj.object_number)
+    safe_designation = html_escape(obj.designation)
+    safe_layout = html_escape(layout)
+    pdf_url = f"/api/objects/{obj.id}/sticker/pdf?layout={safe_layout}"
+    return_url = f"/?v=48#object/{obj.id}"
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "_", obj.object_number).strip("_") or "aufkleber"
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="de">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <title>Aufkleber {safe_number}</title>
+        <style>
+            * {{ box-sizing: border-box; }}
+            html, body {{ width: 100%; height: 100%; margin: 0; }}
+            body {{ display: flex; flex-direction: column; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #222; background: #dfe3e7; }}
+            .toolbar {{ flex: none; z-index: 10; padding: calc(10px + env(safe-area-inset-top)) 12px 10px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.16); }}
+            .toolbar-row {{ display: flex; align-items: center; gap: 8px; max-width: 980px; margin: 0 auto; }}
+            .toolbar a, .toolbar button {{ min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 9px 13px; border: 0; border-radius: 8px; color: #fff; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }}
+            .back {{ background: #5d6268; }}
+            .share {{ background: #b71c1c; }}
+            .share:disabled {{ opacity: .65; cursor: wait; }}
+            .title {{ min-width: 0; margin-left: auto; text-align: right; line-height: 1.2; }}
+            .title strong, .title small {{ display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+            .title small {{ margin-top: 2px; color: #657080; }}
+            #share-status {{ max-width: 980px; min-height: 1.2em; margin: 7px auto 0; color: #59636f; font-size: .85rem; }}
+            .preview {{ flex: 1 1 auto; min-height: 0; padding: 10px; }}
+            iframe {{ display: block; width: 100%; height: 100%; border: 0; border-radius: 8px; background: #fff; }}
+            @media (max-width: 640px) {{
+                .toolbar-row {{ flex-wrap: wrap; }}
+                .toolbar a, .toolbar button {{ flex: 1 1 calc(50% - 4px); }}
+                .title {{ flex: 1 1 100%; order: 3; margin-left: 0; text-align: left; }}
+                .preview {{ padding: 6px; }}
+            }}
+            @media print {{
+                .toolbar {{ display: none !important; }}
+                .preview {{ padding: 0; }}
+                iframe {{ border-radius: 0; }}
+            }}
+        </style>
+    </head>
+    <body>
+        <header class="toolbar">
+            <div class="toolbar-row">
+                <a class="back" href="{return_url}">← Zurück zum Gerät</a>
+                <button id="share-pdf" class="share" type="button">↗ Teilen / Drucken</button>
+                <div class="title"><strong>{safe_designation}</strong><small>{safe_number}</small></div>
+            </div>
+            <div id="share-status">Auf dem iPhone „Teilen / Drucken“ und anschließend „Drucken“ auswählen.</div>
+        </header>
+        <main class="preview">
+            <iframe src="{pdf_url}#toolbar=0&amp;navpanes=0&amp;view=FitH" title="PDF-Vorschau Aufkleber {safe_number}"></iframe>
+        </main>
+        <script>
+            const pdfUrl = {json.dumps(pdf_url)};
+            const pdfFilename = {json.dumps(filename + "_" + layout + ".pdf")};
+            const shareTitle = {json.dumps("Aufkleber " + obj.object_number)};
+            const shareButton = document.getElementById('share-pdf');
+            const shareStatus = document.getElementById('share-status');
+
+            shareButton.addEventListener('click', async () => {{
+                const originalText = shareButton.textContent;
+                shareButton.disabled = true;
+                shareButton.textContent = 'PDF wird vorbereitet …';
+                try {{
+                    const response = await fetch(pdfUrl, {{ credentials: 'same-origin' }});
+                    if (!response.ok) throw new Error('PDF konnte nicht geladen werden');
+                    const blob = await response.blob();
+                    const file = new File([blob], pdfFilename, {{ type: 'application/pdf' }});
+                    const shareData = {{ files: [file], title: shareTitle }};
+
+                    if (navigator.share && (!navigator.canShare || navigator.canShare(shareData))) {{
+                        await navigator.share(shareData);
+                        shareStatus.textContent = 'Teilen-Menü geschlossen. Du bleibst in der Aufkleberansicht.';
+                    }} else {{
+                        const downloadUrl = URL.createObjectURL(blob);
+                        const downloadLink = document.createElement('a');
+                        downloadLink.href = downloadUrl;
+                        downloadLink.download = pdfFilename;
+                        document.body.appendChild(downloadLink);
+                        downloadLink.click();
+                        downloadLink.remove();
+                        setTimeout(() => URL.revokeObjectURL(downloadUrl), 30000);
+                        shareStatus.textContent = 'PDF wurde heruntergeladen. Die Aufkleberansicht bleibt geöffnet.';
+                    }}
+                }} catch (error) {{
+                    if (error && error.name === 'AbortError') {{
+                        shareStatus.textContent = 'Teilen wurde abgebrochen. Du bleibst in der Aufkleberansicht.';
+                    }} else {{
+                        shareStatus.textContent = 'Das PDF konnte nicht geteilt werden. Bitte erneut versuchen.';
+                    }}
+                }} finally {{
+                    shareButton.disabled = false;
+                    shareButton.textContent = originalText;
+                }}
+            }});
+        </script>
+    </body>
+    </html>
+    """
+
+
 @app.get("/api/objects/{object_id}/sticker/print", response_class=HTMLResponse)
 def print_sticker(object_id: int, db: Session = Depends(get_db)):
     obj = db.query(InventoryObject).filter(InventoryObject.id == object_id).first()
@@ -2090,7 +2205,8 @@ def print_sticker(object_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="QR-Code nicht gefunden")
     qr_url = f"/uploads/qrcodes/{html_escape(obj.qr_code.filename)}"
     barcode_url = f"/api/objects/{obj.id}/barcode.svg"
-    return_url = f"/?v=47#object/{obj.id}"
+    return_url = f"/?v=48#object/{obj.id}"
+    download_name = re.sub(r"[^A-Za-z0-9._-]+", "_", obj.object_number).strip("_") or "aufkleber"
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -2104,10 +2220,12 @@ def print_sticker(object_id: int, db: Session = Depends(get_db)):
             .toolbar-row {{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }}
             button, .back, .pdf-action {{ min-height: 42px; padding: 9px 13px; border: 0; border-radius: 7px; background: #5d6268; color: white; font: inherit; font-weight: 650; cursor: pointer; text-decoration: none; }}
             .pdf-action {{ display: inline-flex; align-items: center; background: #b71c1c; }}
+            .pdf-action:disabled {{ opacity: .65; cursor: wait; }}
             button.layout.active {{ outline: 3px solid #ffd1d1; background: #8f1515; }}
             .toolbar h1 {{ margin: 12px 0 6px; font-size: 1.3rem; }}
             .toolbar p {{ margin: 0 0 12px; color: #626b75; }}
             #size-note {{ margin-top: 10px; font-weight: 650; color: #334155; }}
+            #pdf-status {{ min-height: 1.2em; margin-top: 7px; color: #59636f; font-size: .88rem; }}
             .preview {{ display: flex; justify-content: center; align-items: flex-start; min-height: 290px; padding: 42px 12px; overflow: auto; }}
             .sticker {{ display: none; overflow: hidden; border: .35mm solid #111; background: white; color: black; }}
             .sticker.active {{ display: flex; }}
@@ -2144,10 +2262,10 @@ def print_sticker(object_id: int, db: Session = Depends(get_db)):
         <div class="toolbar no-print">
             <div class="toolbar-row">
                 <a class="back" href="{return_url}">← Zurück zum Gerät</a>
-                <a id="pdf-action" class="pdf-action" href="/api/objects/{obj.id}/sticker/pdf?layout=qr-id">🖨️ Etikett drucken / PDF</a>
+                <button id="pdf-action" class="pdf-action" type="button" onclick="shareStickerPdf()">↗ Teilen / Drucken</button>
             </div>
             <h1>Aufkleber für {safe_designation}</h1>
-            <p>Vor dem Drucken die passende Etikettengröße auswählen. Das maßgenaue PDF enthält keine Browser-Kopf- oder Fußzeile und öffnet sich im selben Tab. Mit der Browser-Zurücktaste gelangst du wieder hierher.</p>
+            <p>Vor dem Drucken die passende Etikettengröße auswählen. „Teilen / Drucken“ öffnet auf dem iPhone das Systemmenü, ohne die Web-App zu verlassen.</p>
             <div class="toolbar-row" role="group" aria-label="Aufklebergröße">
                 <button class="layout" data-layout="qr-small" onclick="selectLayout('qr-small')">Nur QR · 25×25</button>
                 <button class="layout active" data-layout="qr-id" onclick="selectLayout('qr-id')">QR + ID · 50×25</button>
@@ -2155,6 +2273,7 @@ def print_sticker(object_id: int, db: Session = Depends(get_db)):
                 <button class="layout" data-layout="barcode" onclick="selectLayout('barcode')">Strichcode · 55×18</button>
             </div>
             <div id="size-note">Ausgewählt: QR-Code mit Geräte-ID, 50 × 25 mm</div>
+            <div id="pdf-status" aria-live="polite"></div>
         </div>
         <div class="preview">
             <div class="sticker qr-only" data-sticker="qr-small"><img src="{qr_url}" alt="QR-Code {safe_number}"></div>
@@ -2178,11 +2297,54 @@ def print_sticker(object_id: int, db: Session = Depends(get_db)):
                 'qr-full': 'Ausgewählt: QR-Code mit Bezeichnung und Geräte-ID, 70 × 35 mm',
                 'barcode': 'Ausgewählt: schmaler Code-128-Strichcode, 55 × 18 mm'
             }};
+            let selectedLayout = 'qr-id';
             function selectLayout(layout) {{
+                selectedLayout = layout;
                 document.querySelectorAll('[data-sticker]').forEach(item => item.classList.toggle('active', item.dataset.sticker === layout));
                 document.querySelectorAll('button.layout').forEach(item => item.classList.toggle('active', item.dataset.layout === layout));
                 document.getElementById('size-note').textContent = notes[layout];
-                document.getElementById('pdf-action').href = '/api/objects/{obj.id}/sticker/pdf?layout=' + encodeURIComponent(layout);
+            }}
+
+            async function shareStickerPdf() {{
+                const button = document.getElementById('pdf-action');
+                const status = document.getElementById('pdf-status');
+                const originalText = button.textContent;
+                button.disabled = true;
+                button.textContent = 'PDF wird vorbereitet …';
+                status.textContent = '';
+                try {{
+                    const pdfUrl = '/api/objects/{obj.id}/sticker/pdf?layout=' + encodeURIComponent(selectedLayout);
+                    const response = await fetch(pdfUrl, {{ credentials: 'same-origin' }});
+                    if (!response.ok) throw new Error('PDF konnte nicht geladen werden');
+                    const blob = await response.blob();
+                    const filename = {json.dumps(download_name)} + '_' + selectedLayout + '.pdf';
+                    const file = new File([blob], filename, {{ type: 'application/pdf' }});
+                    const shareData = {{ files: [file], title: {json.dumps('Aufkleber ' + obj.object_number)} }};
+
+                    if (navigator.share && (!navigator.canShare || navigator.canShare(shareData))) {{
+                        await navigator.share(shareData);
+                        status.textContent = 'Systemmenü geschlossen. Die Aufkleberseite bleibt geöffnet.';
+                    }} else {{
+                        const downloadUrl = URL.createObjectURL(blob);
+                        const downloadLink = document.createElement('a');
+                        downloadLink.href = downloadUrl;
+                        downloadLink.download = filename;
+                        document.body.appendChild(downloadLink);
+                        downloadLink.click();
+                        downloadLink.remove();
+                        setTimeout(() => URL.revokeObjectURL(downloadUrl), 30000);
+                        status.textContent = 'PDF wurde heruntergeladen. Die Aufkleberseite bleibt geöffnet.';
+                    }}
+                }} catch (error) {{
+                    if (error && error.name === 'AbortError') {{
+                        status.textContent = 'Teilen wurde abgebrochen. Die Aufkleberseite bleibt geöffnet.';
+                    }} else {{
+                        status.textContent = 'Das PDF konnte nicht erstellt werden. Bitte erneut versuchen.';
+                    }}
+                }} finally {{
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }}
             }}
         </script>
     </body>
