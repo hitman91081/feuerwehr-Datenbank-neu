@@ -51,11 +51,18 @@ body {
     padding: 0.8rem;
     font-size: 1rem;
 }
-.login-hint {
+.login-legal {
     text-align: center;
     margin-top: 1rem;
     font-size: 0.85rem;
-    color: #888;
+}
+.login-legal a {
+    color: #667085;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.login-legal a:hover {
+    color: #b71c1c;
 }
 
 /* === App Header === */
@@ -146,6 +153,20 @@ main {
     max-width: 1000px;
     margin: 0 auto;
     padding: 1rem;
+}
+
+.site-footer {
+    padding: 1rem 1rem 1.5rem;
+    text-align: center;
+    color: #667085;
+    font-size: 0.85rem;
+}
+.site-footer a {
+    color: inherit;
+    text-underline-offset: 2px;
+}
+.site-footer a:hover {
+    color: #b71c1c;
 }
 
 /* === Buttons === */

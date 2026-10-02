@@ -1935,7 +1935,7 @@ def get_qr_login_sticker():
     <body>
         <div class="toolbar no-print">
             <div class="toolbar-actions">
-                <a href="/?v=45#admin">← Zurück zur Verwaltung</a>
+                <a href="/?v=46#admin">← Zurück zur Verwaltung</a>
                 <button onclick="window.print()">🖨️ Drucken</button>
             </div>
             <p>Empfohlene Aufkleber-Größe: 50 x 50 mm oder größer</p>
@@ -2090,7 +2090,7 @@ def print_sticker(object_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="QR-Code nicht gefunden")
     qr_url = f"/uploads/qrcodes/{html_escape(obj.qr_code.filename)}"
     barcode_url = f"/api/objects/{obj.id}/barcode.svg"
-    return_url = f"/?v=45#object/{obj.id}"
+    return_url = f"/?v=46#object/{obj.id}"
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -3243,6 +3243,78 @@ async def import_full_backup(
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 # --- Frontend ---
+
+@app.get("/impressum", response_class=HTMLResponse)
+async def imprint():
+    return HTMLResponse(
+        content="""
+        <!DOCTYPE html>
+        <html lang="de">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Impressum – Feuerwehr Inventar</title>
+            <style>
+                * { box-sizing: border-box; }
+                body {
+                    margin: 0;
+                    min-height: 100vh;
+                    padding: 24px;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    color: #30343a;
+                    background: #f0f2f5;
+                }
+                main {
+                    width: min(100%, 680px);
+                    margin: 6vh auto 0;
+                    padding: 28px;
+                    border-top: 6px solid #b71c1c;
+                    border-radius: 12px;
+                    background: #fff;
+                    box-shadow: 0 8px 28px rgba(0,0,0,.1);
+                }
+                h1 { margin: 0 0 20px; color: #b71c1c; }
+                h2 { margin: 24px 0 8px; font-size: 1.05rem; }
+                address { font-style: normal; line-height: 1.7; }
+                .back {
+                    display: inline-flex;
+                    margin-top: 28px;
+                    padding: 10px 14px;
+                    border-radius: 7px;
+                    color: #fff;
+                    background: #b71c1c;
+                    text-decoration: none;
+                    font-weight: 700;
+                }
+                @media (max-width: 520px) {
+                    body { padding: 12px; }
+                    main { margin-top: 2vh; padding: 22px 18px; }
+                    .back { width: 100%; justify-content: center; }
+                }
+            </style>
+        </head>
+        <body>
+            <main>
+                <h1>Impressum</h1>
+                <h2>Kontakt und Anschrift</h2>
+                <address>
+                    Julian Guckert<br>
+                    Burgstr. 17A<br>
+                    66459 Kirkel
+                </address>
+                <h2>E-Mail</h2>
+                <p>jgtech.ki(at)gmail.com</p>
+                <a class="back" href="/">← Zurück zur Anwendung</a>
+            </main>
+        </body>
+        </html>
+        """,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
