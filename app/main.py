@@ -1895,6 +1895,48 @@ def get_qr_login_code():
     """QR-Code für schnellen Standardnutzer-Login"""
     return FileResponse(ensure_qr_login_code())
 
+
+@app.get("/api/auth/qr-login-sticker/pdf")
+def get_qr_login_sticker_pdf():
+    """Maßgenaues QR-Login-Etikett als PDF ohne Browser-Kopf- und Fußzeilen."""
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    from reportlab.pdfgen import canvas
+
+    qr_path = ensure_qr_login_code()
+    width, height = 60 * mm, 70 * mm
+    output = io.BytesIO()
+    pdf = canvas.Canvas(output, pagesize=(width, height), pageCompression=1)
+    pdf.setTitle("QR-Login Feuerwehr Inventar")
+
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.drawCentredString(width / 2, 64 * mm, "Feuerwehr Inventar")
+    pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawCentredString(width / 2, 59.5 * mm, "Standardnutzer-Login")
+    pdf.drawImage(qr_path, 9 * mm, 15 * mm, 42 * mm, 42 * mm, preserveAspectRatio=True, mask="auto")
+    pdf.setFont("Helvetica", 6.5)
+    pdf.drawCentredString(width / 2, 11.5 * mm, "QR-Code scannen fuer schnellen Zugriff")
+
+    login_url = f"{BASE_URL}/?qrlogin=1"
+    font_size = 5.5
+    while font_size > 4 and stringWidth(login_url, "Helvetica", font_size) > 56 * mm:
+        font_size -= .25
+    pdf.setFont("Helvetica", font_size)
+    pdf.drawCentredString(width / 2, 7.5 * mm, login_url)
+
+    pdf.showPage()
+    pdf.save()
+    output.seek(0)
+    return Response(
+        content=output.getvalue(),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": 'inline; filename="qr_standard_login.pdf"',
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+    )
+
+
 @app.get("/api/auth/qr-login-sticker", response_class=HTMLResponse)
 def get_qr_login_sticker():
     """Druckbarer Aufkleber mit QR-Login-Code"""
@@ -1912,7 +1954,9 @@ def get_qr_login_sticker():
             .toolbar-actions {{ display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }}
             .toolbar a, .toolbar button {{ min-height: 42px; padding: 9px 14px; border: 0; border-radius: 7px; background: #5d6268; color: #fff; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }}
             .toolbar button {{ background: #b71c1c; }}
+            .toolbar button:disabled {{ opacity: .65; cursor: wait; }}
             .toolbar p {{ margin: 12px 0 0; color: #626b75; }}
+            #pdf-status {{ min-height: 1.2em; margin-top: 7px; color: #59636f; font-size: .88rem; }}
             .sticker {{ border: 2px dashed #ccc; padding: 20px; display: inline-block; max-width: 400px; }}
             .sticker img {{ width: 200px; height: 200px; }}
             .sticker h3 {{ margin: 0.5rem 0; color: #333; }}
@@ -1935,10 +1979,11 @@ def get_qr_login_sticker():
     <body>
         <div class="toolbar no-print">
             <div class="toolbar-actions">
-                <a href="/?v=48#admin">← Zurück zur Verwaltung</a>
-                <button onclick="window.print()">🖨️ Drucken</button>
+                <a href="/?v=49#admin">← Zurück zur Verwaltung</a>
+                <button id="qr-print-action" type="button" onclick="shareQrLoginPdf()">↗ Teilen / Drucken</button>
             </div>
-            <p>Empfohlene Aufkleber-Größe: 50 x 50 mm oder größer</p>
+            <p>„Teilen / Drucken“ öffnet auf dem iPhone das Systemmenü, ohne die Web-App zu verlassen. PDF-Größe: 60 × 70 mm.</p>
+            <div id="pdf-status" aria-live="polite"></div>
         </div>
         <div class="sticker">
             <h3>🚒 Feuerwehr Inventar</h3>
@@ -1947,6 +1992,47 @@ def get_qr_login_sticker():
             <p>Scannen für Standardnutzer-Login</p>
             <p class="url">{BASE_URL}/?qrlogin=1</p>
         </div>
+        <script>
+            async function shareQrLoginPdf() {{
+                const button = document.getElementById('qr-print-action');
+                const status = document.getElementById('pdf-status');
+                const originalText = button.textContent;
+                button.disabled = true;
+                button.textContent = 'PDF wird vorbereitet …';
+                status.textContent = '';
+                try {{
+                    const response = await fetch('/api/auth/qr-login-sticker/pdf', {{ credentials: 'same-origin' }});
+                    if (!response.ok) throw new Error('PDF konnte nicht geladen werden');
+                    const blob = await response.blob();
+                    const file = new File([blob], 'qr_standard_login.pdf', {{ type: 'application/pdf' }});
+                    const shareData = {{ files: [file], title: 'QR-Login Feuerwehr Inventar' }};
+
+                    if (navigator.share && (!navigator.canShare || navigator.canShare(shareData))) {{
+                        await navigator.share(shareData);
+                        status.textContent = 'Systemmenü geschlossen. Die QR-Aufkleberseite bleibt geöffnet.';
+                    }} else {{
+                        const downloadUrl = URL.createObjectURL(blob);
+                        const downloadLink = document.createElement('a');
+                        downloadLink.href = downloadUrl;
+                        downloadLink.download = 'qr_standard_login.pdf';
+                        document.body.appendChild(downloadLink);
+                        downloadLink.click();
+                        downloadLink.remove();
+                        setTimeout(() => URL.revokeObjectURL(downloadUrl), 30000);
+                        status.textContent = 'PDF wurde heruntergeladen. Die QR-Aufkleberseite bleibt geöffnet.';
+                    }}
+                }} catch (error) {{
+                    if (error && error.name === 'AbortError') {{
+                        status.textContent = 'Teilen wurde abgebrochen. Die QR-Aufkleberseite bleibt geöffnet.';
+                    }} else {{
+                        status.textContent = 'Das PDF konnte nicht erstellt werden. Bitte erneut versuchen.';
+                    }}
+                }} finally {{
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }}
+            }}
+        </script>
     </body>
     </html>
     """
@@ -2092,7 +2178,7 @@ def preview_sticker_pdf(object_id: int, layout: str = "qr-id", db: Session = Dep
     safe_designation = html_escape(obj.designation)
     safe_layout = html_escape(layout)
     pdf_url = f"/api/objects/{obj.id}/sticker/pdf?layout={safe_layout}"
-    return_url = f"/?v=48#object/{obj.id}"
+    return_url = f"/?v=49#object/{obj.id}"
     filename = re.sub(r"[^A-Za-z0-9._-]+", "_", obj.object_number).strip("_") or "aufkleber"
 
     return f"""
@@ -2205,7 +2291,7 @@ def print_sticker(object_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="QR-Code nicht gefunden")
     qr_url = f"/uploads/qrcodes/{html_escape(obj.qr_code.filename)}"
     barcode_url = f"/api/objects/{obj.id}/barcode.svg"
-    return_url = f"/?v=48#object/{obj.id}"
+    return_url = f"/?v=49#object/{obj.id}"
     download_name = re.sub(r"[^A-Za-z0-9._-]+", "_", obj.object_number).strip("_") or "aufkleber"
     html = f"""
     <!DOCTYPE html>
