@@ -1935,7 +1935,7 @@ def get_qr_login_sticker():
     <body>
         <div class="toolbar no-print">
             <div class="toolbar-actions">
-                <a href="/?v=46#admin">← Zurück zur Verwaltung</a>
+                <a href="/?v=47#admin">← Zurück zur Verwaltung</a>
                 <button onclick="window.print()">🖨️ Drucken</button>
             </div>
             <p>Empfohlene Aufkleber-Größe: 50 x 50 mm oder größer</p>
@@ -2090,7 +2090,7 @@ def print_sticker(object_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="QR-Code nicht gefunden")
     qr_url = f"/uploads/qrcodes/{html_escape(obj.qr_code.filename)}"
     barcode_url = f"/api/objects/{obj.id}/barcode.svg"
-    return_url = f"/?v=46#object/{obj.id}"
+    return_url = f"/?v=47#object/{obj.id}"
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -2144,10 +2144,10 @@ def print_sticker(object_id: int, db: Session = Depends(get_db)):
         <div class="toolbar no-print">
             <div class="toolbar-row">
                 <a class="back" href="{return_url}">← Zurück zum Gerät</a>
-                <a id="pdf-action" class="pdf-action" href="/api/objects/{obj.id}/sticker/pdf?layout=qr-id" target="_blank">🖨️ Etikett drucken / PDF</a>
+                <a id="pdf-action" class="pdf-action" href="/api/objects/{obj.id}/sticker/pdf?layout=qr-id">🖨️ Etikett drucken / PDF</a>
             </div>
             <h1>Aufkleber für {safe_designation}</h1>
-            <p>Vor dem Drucken die passende Etikettengröße auswählen. Das maßgenaue PDF enthält keine Browser-Kopf- oder Fußzeile.</p>
+            <p>Vor dem Drucken die passende Etikettengröße auswählen. Das maßgenaue PDF enthält keine Browser-Kopf- oder Fußzeile und öffnet sich im selben Tab. Mit der Browser-Zurücktaste gelangst du wieder hierher.</p>
             <div class="toolbar-row" role="group" aria-label="Aufklebergröße">
                 <button class="layout" data-layout="qr-small" onclick="selectLayout('qr-small')">Nur QR · 25×25</button>
                 <button class="layout active" data-layout="qr-id" onclick="selectLayout('qr-id')">QR + ID · 50×25</button>
@@ -2649,14 +2649,6 @@ def get_inspection(inspection_id: int, db: Session = Depends(get_db), user: User
     if user.role == UserRole.STANDARD and not standard_user_can_access_inspection(i.inventory_object, i.template_id):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
 
-    requested_maintenance_id = (
-        data.maintenance_id if "maintenance_id" in data.model_fields_set else i.maintenance_id
-    )
-    if requested_maintenance_id != i.maintenance_id:
-        raise HTTPException(
-            status_code=409,
-            detail="Die zugeordnete Prüffrist kann nach dem Speichern nicht mehr geändert werden."
-        )
     return build_inspection_response(i)
 
 @app.put("/api/inspections/{inspection_id}", response_model=InspectionResponse)
@@ -2678,6 +2670,15 @@ def update_inspection(
     # Standardnutzer dürfen nur die am Objekt festgelegte Prüfkarte bearbeiten.
     if user.role == UserRole.STANDARD and not standard_user_can_access_inspection(i.inventory_object, i.template_id):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
+
+    requested_maintenance_id = (
+        data.maintenance_id if "maintenance_id" in data.model_fields_set else i.maintenance_id
+    )
+    if requested_maintenance_id != i.maintenance_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Die zugeordnete Prüffrist kann nach dem Speichern nicht mehr geändert werden."
+        )
 
     import json
     inspector_name = data.inspector_name.strip()
